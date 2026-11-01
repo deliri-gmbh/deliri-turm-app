@@ -290,3 +290,5 @@ table.timetbl td:first-child,table.teamtbl td:first-child{width:auto;text-align:
 .primary.small{min-height:36px;padding:6px 12px;font-size:14px}
 #f-new[data-kind=turm] .only-site,#f-new[data-kind=baustelle] .only-turm{display:none!important}
 .clockbtns .ghost{min-height:46px}
+.mm input.numin{width:150px}
+.repnums{margin:8px 0 4px}

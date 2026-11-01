@@ -245,6 +245,10 @@
       } else {
         html += `<ul class="check">${sec.items.map(it => {
           const ch = map.get(it.id);
+          if (it.input === 'text') return `<li class="${ch ? 'is-done' : ''}"><div class="inrow">
+              <span class="txt">${esc(it.text)}</span>
+              <span class="mm"><input type="text" class="numin" ${it.numeric ? 'inputmode="numeric"' : ''} id="in-${it.id}" value="${esc(ch?.value || '')}" placeholder="${esc(it.placeholder || '')}" aria-label="${esc(it.text)}" autocomplete="off"><button type="button" class="ghost small" data-in="${it.id}" data-check="${esc(it.check || '')}">Speichern</button></span>
+              ${ch ? `<span class="pill ok">${esc(ch.value)}</span> ${who(ch)}` : ''}</div></li>`;
           if (it.input) return `<li class="${ch ? 'is-done' : ''}"><div class="inrow">
               <span class="txt">${esc(it.text)}${it.ref ? ` <span class="ref">${esc(it.ref)}</span>` : ''}</span>
               <span class="mm"><input type="number" inputmode="decimal" id="in-${it.id}" value="${esc(ch?.value || '')}" placeholder="mm" aria-label="${esc(it.text)}"><button type="button" class="ghost small" data-in="${it.id}" data-min="${it.min}" data-max="${it.max}">Speichern</button></span>
@@ -286,7 +290,8 @@
     main.querySelectorAll('button[data-in]').forEach(b => b.onclick = () => safe(async () => {
       const v = document.getElementById('in-' + b.dataset.in).value.trim();
       await S.setCheck(tower.id, phase, b.dataset.in, !!v, v);
-      if (v && (+v < +b.dataset.min || +v > +b.dataset.max)) toast('Außer Toleranz. Leiter korrigieren und neu messen.', true);
+      if (v && b.dataset.min && (+v < +b.dataset.min || +v > +b.dataset.max)) toast('Außer Toleranz. Leiter korrigieren und neu messen.', true);
+      if (v && b.dataset.check && !new RegExp(b.dataset.check).test(v)) toast('Bitte Nummer prüfen. Die FAUF-Nr. hat meist 8 Ziffern, z.B. 11216520.', true);
       viewTower(tower.id, phase);
     }));
     const f = document.getElementById('f-sign');
@@ -1273,7 +1278,7 @@
       const items = window.flatItems(tpl, phase);
       const so = signoffs.filter(s => s.phase === phase);
       return `<h2>${esc(tpl.phases[phase].title)} <span class="muted">${items.filter(i => map.has(i.key)).length}/${items.length}</span></h2>
-        <table class="rep"><tbody>${items.map(i => { const c = map.get(i.key); return `<tr><td>${c ? '✓' : '○'}</td><td>${esc(i.label)}${c?.value ? ' <b>' + esc(c.value) + ' mm</b>' : ''}</td><td class="muted">${c ? esc(c.done_by_name) + ', ' + fmt(c.done_at) : 'offen'}</td></tr>`; }).join('')}</tbody></table>
+        <table class="rep"><tbody>${items.map(i => { const c = map.get(i.key); return `<tr><td>${c ? '✓' : '○'}</td><td>${esc(i.label)}${c?.value ? ' <b>' + esc(c.value) + (i.unit || '') + '</b>' : ''}</td><td class="muted">${c ? esc(c.done_by_name) + ', ' + fmt(c.done_at) : 'offen'}</td></tr>`; }).join('')}</tbody></table>
         <p>${so.length ? so.map(s => `Unterschrieben: <b>${esc(s.name)}</b>, ${fmt(s.signed_at)}${s.open_items ? ` (mit ${s.open_items} offenen Punkten)` : ''}${s.note ? ' · ' + esc(s.note) : ''}`).join('<br>') : 'Noch nicht unterschrieben.'}</p>`;
     };
     app.innerHTML = `<div class="noprint">${header('<div class="sub">Protokoll</div>', '#/t/' + id + '/info')}</div>
@@ -1281,6 +1286,7 @@
         <div class="row between noprint"><span></span><button class="primary" type="button" onclick="window.print()">Drucken / PDF</button></div>
         <h1>Montageprotokoll ${esc(tower.park)} · ${esc(tower.name)}</h1>
         <p class="muted">${esc(tpl.name)} · Kunde ${esc(tower.customer || '')} · Deliri GmbH · erstellt ${fmt(new Date().toISOString())}</p>
+        <dl class="kv repnums"><dt>FAUF-Nr.</dt><dd><b>${esc(checks.find(c => c.item_id === 'fauf')?.value || 'fehlt')}</b></dd><dt>Seriennummer Leiter</dt><dd><b>${esc(checks.find(c => c.item_id === 'leiter_sn')?.value || 'fehlt')}</b></dd></dl>
         ${block('wls')}${block('fin')}
         <h2>Mängel</h2>${defects.length ? `<table class="rep"><tbody>${defects.map(d => `<tr><td>${d.status === 'offen' ? '!' : '✓'}</td><td><b>${esc(d.title)}</b>${d.location ? ' · ' + esc(d.location) : ''}${d.needs_part ? ' · Teil: ' + esc(d.needs_part) : ''}${d.description ? '<br>' + esc(d.description) : ''}</td><td class="muted">${esc(d.created_by_name)}, ${fmt(d.created_at)}${d.status === 'erledigt' ? '<br>erledigt ' + esc(d.resolved_by_name) : ''}</td></tr>`).join('')}</tbody></table>` : '<p>Keine.</p>'}
       </main>`;

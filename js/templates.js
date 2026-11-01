@@ -183,7 +183,7 @@
           const col = sec.cols.find(x => x.id === c);
           out.push({ key: r.id + '-' + c, label: r.label + ' ' + col.help });
         }));
-      } else sec.items.forEach(it => out.push({ key: it.id, label: it.text }));
+      } else sec.items.forEach(it => out.push({ key: it.id, label: it.text, unit: it.input === 'mm' ? ' mm' : '' }));
     });
     return out;
   }
@@ -218,6 +218,15 @@
   }
 
   window.TEMPLATES = { [n23.id]: n23 };
+
+  // Gilt für jeden Turmtyp: vor dem Start der WLS die Nummern für das Protokoll erfassen
+  const START_SECTION = { title: 'Vor dem Start: Nummern fürs Protokoll',
+    note: 'Bitte vor Beginn der WLS Montage eintragen.',
+    items: [
+      { id: 'fauf', text: 'FAUF-Nr. (Zettel auf Gitterscheibe Nr. 1, Barcode-Nummer unten links)', input: 'text', numeric: true, placeholder: 'z.B. 11216520', check: '^\\d{6,10}$' },
+      { id: 'leiter_sn', text: 'Seriennummer der Leiter (Sticker auf der Leiter C01)', input: 'text', placeholder: 'Seriennummer' }
+    ] };
+  Object.values(window.TEMPLATES).forEach(t => { if (!t.phases.wls.sections.some(x => x === START_SECTION)) t.phases.wls.sections.unshift(START_SECTION); });
   window.flatItems = flatItems;
   window.summarizeDay = summarizeDay;
 })();
