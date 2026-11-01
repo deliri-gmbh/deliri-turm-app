@@ -68,10 +68,27 @@
         return data?.signedUrl || null;
       },
 
+      // Tagesbericht: Arbeitszeit und Regie. filter = { towerIds: [...], date: 'YYYY-MM-DD' }
+      async listWorkdays(f) { return ok(await sb.from('workdays').select('*').in('tower_id', f.towerIds).eq('work_date', f.date).order('start_time')); },
+      async addWorkday(w) { return ok(await sb.from('workdays').insert({ ...w, created_by_name: nameOf(user) }).select().single()); },
+      async deleteWorkday(id) { ok(await sb.from('workdays').delete().eq('id', id)); },
+      async listRegie(f) { return ok(await sb.from('regie').select('*').in('tower_id', f.towerIds).eq('work_date', f.date).order('start_time')); },
+      async addRegie(r, photoBlob) {
+        let photo_path = null;
+        if (photoBlob) {
+          photo_path = 'regie/' + r.tower_id + '/' + crypto.randomUUID() + '.jpg';
+          ok(await sb.storage.from('defects').upload(photo_path, photoBlob, { contentType: 'image/jpeg' }));
+        }
+        return ok(await sb.from('regie').insert({ ...r, photo_path, created_by_name: nameOf(user) }).select().single());
+      },
+      async deleteRegie(id) { ok(await sb.from('regie').delete().eq('id', id)); },
+
       subscribe(towerId, cb) {
         const ch = sb.channel('tower-' + towerId)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'checks', filter: 'tower_id=eq.' + towerId }, cb)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'defects', filter: 'tower_id=eq.' + towerId }, cb)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'workdays', filter: 'tower_id=eq.' + towerId }, cb)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'regie', filter: 'tower_id=eq.' + towerId }, cb)
           .subscribe();
         return () => sb.removeChannel(ch);
       }
@@ -84,6 +101,7 @@
     let db;
     try { db = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { db = null; }
     db = db || { user: null, towers: [], checks: [], signoffs: [], defects: [] };
+    db.workdays = db.workdays || []; db.regie = db.regie || [];
     const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { console.warn('Speicher voll', e); } };
     const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
     const now = () => new Date().toISOString();
@@ -101,7 +119,7 @@
       async getTower(id) { return db.towers.find(t => t.id === id) || null; },
       async createTower(t) { const r = { id: uid(), status: 'offen', notes: '', created_at: now(), created_by_name: db.user?.name || '', ...t }; db.towers.push(r); save(); return r; },
       async updateTower(id, patch) { const t = db.towers.find(x => x.id === id); Object.assign(t, patch); save(); return t; },
-      async deleteTower(id) { db.towers = db.towers.filter(t => t.id !== id); ['checks', 'signoffs', 'defects'].forEach(k => db[k] = db[k].filter(x => x.tower_id !== id)); save(); },
+      async deleteTower(id) { db.towers = db.towers.filter(t => t.id !== id); ['checks', 'signoffs', 'defects', 'workdays', 'regie'].forEach(k => db[k] = db[k].filter(x => x.tower_id !== id)); save(); },
 
       async getChecks(towerId) { return db.checks.filter(c => c.tower_id === towerId); },
       async allChecks() { return db.checks; },
@@ -131,6 +149,17 @@
         save();
       },
       async photoUrl(path) { return path || null; },
+
+      async listWorkdays(f) { return db.workdays.filter(w => f.towerIds.includes(w.tower_id) && w.work_date === f.date).sort((a, b) => a.start_time.localeCompare(b.start_time)); },
+      async addWorkday(w) { const r = { id: uid(), created_at: now(), created_by_name: db.user?.name || '', ...w }; db.workdays.push(r); save(); return r; },
+      async deleteWorkday(id) { db.workdays = db.workdays.filter(w => w.id !== id); save(); },
+      async listRegie(f) { return db.regie.filter(w => f.towerIds.includes(w.tower_id) && w.work_date === f.date).sort((a, b) => a.start_time.localeCompare(b.start_time)); },
+      async addRegie(r, photoBlob) {
+        let photo_path = null;
+        if (photoBlob) photo_path = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(photoBlob); });
+        const x = { id: uid(), created_at: now(), created_by_name: db.user?.name || '', ...r, photo_path }; db.regie.push(x); save(); return x;
+      },
+      async deleteRegie(id) { db.regie = db.regie.filter(w => w.id !== id); save(); },
       subscribe() { return () => {}; }
     };
   }

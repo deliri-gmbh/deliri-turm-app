@@ -188,6 +188,36 @@
     return out;
   }
 
+  // Was wurde an einem Tag erledigt? dayChecks = Häkchen mit done_at an diesem Tag.
+  // Ergebnis: [{ section, text }] in lesbarer Kurzform für den Tagesbericht.
+  function summarizeDay(tpl, phase, dayChecks) {
+    const ids = new Set(dayChecks.filter(c => c.phase === phase).map(c => c.item_id));
+    const out = [];
+    tpl.phases[phase].sections.forEach(sec => {
+      if (sec.type === 'matrix') {
+        const rows = sec.rows.filter(r => r.cells.some(c => ids.has(r.id + '-' + c))).map(r => r.label);
+        if (rows.length) out.push({ section: sec.title, text: 'bearbeitet ' + ranges(rows) });
+      } else {
+        const done = sec.items.filter(it => ids.has(it.id)).map(it => it.text);
+        if (done.length) out.push({ section: sec.title, text: done.join('; ') });
+      }
+    });
+    return out;
+  }
+  // C05, C06, C07, C09 -> "C05 bis C07, C09"
+  function ranges(labels) {
+    const nums = labels.map(l => [l, parseInt(l.replace(/\D/g, ''), 10)]);
+    const parts = []; let i = 0;
+    while (i < nums.length) {
+      let j = i;
+      while (j + 1 < nums.length && nums[j + 1][1] === nums[j][1] + 1) j++;
+      parts.push(j - i >= 2 ? nums[i][0] + ' bis ' + nums[j][0] : nums.slice(i, j + 1).map(n => n[0]).join(', '));
+      i = j + 1;
+    }
+    return parts.join(', ');
+  }
+
   window.TEMPLATES = { [n23.id]: n23 };
   window.flatItems = flatItems;
+  window.summarizeDay = summarizeDay;
 })();

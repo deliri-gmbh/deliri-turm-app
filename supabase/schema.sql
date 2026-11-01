@@ -59,6 +59,42 @@ create table if not exists public.defects (
   resolved_by_name text default ''
 );
 
+-- Arbeitszeit je Turm und Tag (Gesamtzeit vor Ort)
+create table if not exists public.workdays (
+  id uuid primary key default gen_random_uuid(),
+  tower_id uuid not null references public.towers(id) on delete cascade,
+  work_date date not null,
+  start_time text not null,          -- HH:MM
+  end_time text not null,
+  pause_min int not null default 0,
+  persons int not null default 2,
+  names text default '',
+  activities text default '',        -- Tätigkeiten / Bemerkungen
+  weather text default '',
+  created_at timestamptz not null default now(),
+  created_by uuid default auth.uid(),
+  created_by_name text default ''
+);
+
+-- Regiearbeiten (zusätzlich angeordnete Arbeiten, gesondert abzurechnen)
+create table if not exists public.regie (
+  id uuid primary key default gen_random_uuid(),
+  tower_id uuid not null references public.towers(id) on delete cascade,
+  work_date date not null,
+  description text not null,
+  ordered_by text default '',        -- angeordnet von (Name, Firma)
+  start_time text not null,
+  end_time text not null,
+  persons int not null default 2,
+  material text default '',
+  photo_path text,
+  created_at timestamptz not null default now(),
+  created_by uuid default auth.uid(),
+  created_by_name text default ''
+);
+
+create index if not exists workdays_day_idx on public.workdays (work_date, tower_id);
+create index if not exists regie_day_idx on public.regie (work_date, tower_id);
 create index if not exists defects_open_idx on public.defects (status, tower_id);
 create index if not exists checks_tower_idx on public.checks (tower_id);
 
@@ -68,11 +104,13 @@ alter table public.towers   enable row level security;
 alter table public.checks   enable row level security;
 alter table public.signoffs enable row level security;
 alter table public.defects  enable row level security;
+alter table public.workdays enable row level security;
+alter table public.regie    enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['towers','checks','signoffs','defects'] loop
+  foreach t in array array['towers','checks','signoffs','defects','workdays','regie'] loop
     execute format('drop policy if exists team_all on public.%I', t);
     execute format('create policy team_all on public.%I for all to authenticated using (true) with check (true)', t);
   end loop;
@@ -80,12 +118,21 @@ end $$;
 
 -- Unterschriften dürfen nachträglich nicht geändert werden
 drop policy if exists team_all on public.signoffs;
+drop policy if exists signoffs_read on public.signoffs;
+drop policy if exists signoffs_insert on public.signoffs;
 create policy signoffs_read   on public.signoffs for select to authenticated using (true);
 create policy signoffs_insert on public.signoffs for insert to authenticated with check (true);
 
 -- Live-Aktualisierung, wenn mehrere gleichzeitig am selben Turm abhaken
-alter publication supabase_realtime add table public.checks;
-alter publication supabase_realtime add table public.defects;
+do $$
+declare t text;
+begin
+  foreach t in array array['checks','defects','workdays','regie'] loop
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
 
 -- Speicher für Mängelfotos (privat, nur für angemeldete Nutzer)
 insert into storage.buckets (id, name, public)

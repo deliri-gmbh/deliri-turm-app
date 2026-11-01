@@ -1,6 +1,6 @@
 # Deliri Turm-App
 
-Checklisten für den Leiterbau im Betonturm (WLS Montage inkl. Bodenarbeiten und Finishing). Dazu kommen Mängel mit Foto, Unterschrift je Phase und ein Archiv aller Türme. Die App läuft im Browser am Handy und kann auf den Homescreen gelegt werden.
+Tagesberichte und Checklisten für den Leiterbau im Betonturm (WLS Montage inkl. Bodenarbeiten und Finishing). Dazu kommen Mängel mit Foto, Unterschrift je Phase und ein Archiv aller Türme. Die App läuft im Browser am Handy und kann auf den Homescreen gelegt werden.
 
 **Funktionen**
 - Turm anlegen mit Windpark, WEA Nummer und Turmtyp (aktuell Nordex N23 Serie 0.1)
@@ -9,6 +9,7 @@ Checklisten für den Leiterbau im Betonturm (WLS Montage inkl. Bodenarbeiten und
 - Mängel melden mit Foto, Ort und benötigtem Ersatzteil. Offene Mängel stehen auf der Startseite und bei allen Türmen im selben Windpark, damit die nächste Truppe das richtige Teil mitnimmt.
 - Abschluss je Phase mit Unterschrift. Nach dem Finishing landet der Turm im Archiv.
 - Montageprotokoll je Turm zum Drucken bzw. als PDF
+- **Tagesbericht**: Arbeitszeit (von, bis, Pause, Personen, Namen, Tätigkeiten) und **Regiearbeiten** (Tätigkeit, angeordnet von, Zeit, Personen, Material, Foto). Pro Windpark und Tag entsteht daraus automatisch ein Bericht mit Mannstunden gesamt, davon Regie und dem, was laut Checkliste erledigt wurde. Zum Drucken, als PDF oder als Text für E-Mail und WhatsApp.
 - Mehrere Leute können gleichzeitig am selben Turm arbeiten, die Ansicht aktualisiert sich live
 
 Ohne Datenbank läuft die App im **Demo-Modus**: Alles bleibt dann nur auf dem einen Gerät. So kannst du sie sofort ausprobieren.
@@ -31,6 +32,8 @@ Ohne Datenbank läuft die App im **Demo-Modus**: Alles bleibt dann nur auf dem e
 4. Nach 1 bis 2 Minuten läuft die App unter `https://DEINNAME.github.io/deliri-turm-app/`.
 
 Alternativ geht es auch mit Netlify oder Cloudflare Pages: Ordner hineinziehen, fertig.
+
+**Update einspielen:** Wenn die Datenbank schon eingerichtet ist und `schema.sql` erweitert wurde, die Datei einfach nochmal komplett im SQL Editor ausführen. Bestehende Daten bleiben dabei erhalten.
 
 ### 3. Team einladen
 In Supabase unter **Authentication → Users → Invite user** die E-Mail-Adresse eingeben. Der Mitarbeiter bekommt einen Link, öffnet die App und gibt beim ersten Mal seinen Namen ein.

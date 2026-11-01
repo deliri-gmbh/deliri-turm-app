@@ -7,6 +7,26 @@
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
   let unsub = () => {};
   let homeFilter = 'offen';
+  const isoDay = d => { const x = new Date(d); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
+  const today = () => isoDay(new Date());
+  let selDay = today();
+  const dayLabel = s => new Date(s + 'T12:00').toLocaleDateString('de-AT', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+  const shiftDay = (s, n) => { const d = new Date(s + 'T12:00'); d.setDate(d.getDate() + n); return isoDay(d); };
+  // Stunden aus Von/Bis/Pause, über Mitternacht möglich
+  function hoursOf(start, end, pauseMin = 0) {
+    const m = t => { const [h, mi] = String(t || '0:0').split(':').map(Number); return h * 60 + mi; };
+    let d = m(end) - m(start); if (d < 0) d += 1440;
+    return Math.max(0, (d - (+pauseMin || 0)) / 60);
+  }
+  const h = n => n.toLocaleString('de-AT', { maximumFractionDigits: 2 });
+  // Zweimal tippen zum Löschen
+  function twoTap(btn, label, fn) {
+    let armed = false;
+    btn.onclick = () => {
+      if (!armed) { armed = true; btn.textContent = 'Wirklich? Nochmal tippen'; btn.classList.add('danger'); setTimeout(() => { armed = false; btn.textContent = label; btn.classList.remove('danger'); }, 4000); return; }
+      fn();
+    };
+  }
 
   // ---------- kleine Helfer ----------
   function toast(msg, bad) {
@@ -106,9 +126,9 @@
       <div class="chips" role="group" aria-label="Filter">
         ${[['offen', 'In Arbeit'], ['abgeschlossen', 'Archiv'], ['alle', 'Alle']].map(([k, l]) => `<button type="button" class="chip" data-f="${k}" aria-pressed="${homeFilter === k}">${l}</button>`).join('')}
       </div>
-      ${list.length ? parks.map(p => `<section class="park"><h3>${esc(p)}</h3><div class="tgrid">
+      ${list.length ? parks.map(p => `<section class="park"><div class="row between parkhead"><h3>${esc(p)}</h3><a class="ghost small" href="#/tag/${today()}/${encodeURIComponent(p)}">Tagesbericht heute</a></div><div class="tgrid">
         ${list.filter(t => t.park === p).map(t => { const pr = progressOf(t, checks); const od = openBy(t.id); return `
-          <a class="card tower" href="#/t/${t.id}/wls">
+          <a class="card tower" href="#/t/${t.id}/tag">
             <div class="row between"><b class="tname">${esc(t.name)}</b>
               ${t.status === 'abgeschlossen' ? '<span class="pill ok">Fertig</span>' : od ? `<span class="pill bad">${od} Mangel${od > 1 ? '' : ''}</span>` : '<span class="pill">In Arbeit</span>'}</div>
             <div class="muted small">${esc(T[t.tower_type]?.name || t.tower_type)} · ${fmtDay(t.created_at)}</div>
@@ -137,7 +157,7 @@
       e.preventDefault();
       safe(async () => {
         const t = await S.createTower({ park: document.getElementById('t-park').value.trim(), name: document.getElementById('t-name').value.trim(), tower_type: document.getElementById('t-type').value, customer: document.getElementById('t-cust').value.trim() });
-        location.hash = '#/t/' + t.id + '/wls';
+        location.hash = '#/t/' + t.id + '/tag';
       });
     };
   }
@@ -151,7 +171,7 @@
     const [checks, signoffs, defects] = await Promise.all([S.getChecks(id), S.getSignoffs(id), S.listDefects({ towerId: id })]);
     const pr = progressOf(tower, checks);
     const openDef = defects.filter(d => d.status === 'offen').length;
-    const tabs = [['wls', 'WLS', pr.wls + '%'], ['fin', 'Finishing', pr.fin + '%'], ['maengel', 'Mängel', openDef ? String(openDef) : ''], ['info', 'Info', '']];
+    const tabs = [['tag', 'Tag', ''], ['wls', 'WLS', pr.wls + '%'], ['fin', 'Finish', pr.fin + '%'], ['maengel', 'Mängel', openDef ? String(openDef) : ''], ['info', 'Info', '']];
 
     app.innerHTML = header(`<div class="sub">${esc(tower.park)}</div><div class="brand sm">${esc(tower.name)}</div>`, '#/') + `
       <nav class="tabs wrap" role="tablist">${tabs.map(([k, l, b]) => `<a role="tab" href="#/t/${id}/${k}" aria-selected="${tab === k}">${l}${b ? `<span class="badge${k === 'maengel' ? ' bad' : ''}">${b}</span>` : ''}</a>`).join('')}</nav>
@@ -162,6 +182,7 @@
 
     if (tab === 'wls' || tab === 'fin') renderPhase(main, tower, tpl, tab, checks, signoffs);
     else if (tab === 'maengel') renderDefects(main, tower, defects);
+    else if (tab === 'tag') await renderDay(main, tower, tpl, checks, defects);
     else renderInfo(main, tower, tpl, signoffs, pr);
 
     let tmr;
@@ -312,6 +333,176 @@
     };
   }
 
+  // ---------- Reiter Tag: Arbeitszeit, Regie, heute erledigt ----------
+  async function renderDay(main, tower, tpl, checks, defects) {
+    const date = selDay;
+    const [wds, rgs] = await Promise.all([S.listWorkdays({ towerIds: [tower.id], date }), S.listRegie({ towerIds: [tower.id], date })]);
+    const dayChecks = checks.filter(c => isoDay(c.done_at) === date);
+    const done = ['wls', 'fin'].flatMap(p => window.summarizeDay(tpl, p, dayChecks).map(x => ({ ...x, phase: tpl.phases[p].title })));
+    const dayDefects = defects.filter(d => isoDay(d.created_at) === date);
+    const mhWork = wds.reduce((s, w) => s + hoursOf(w.start_time, w.end_time, w.pause_min) * w.persons, 0);
+    const mhRegie = rgs.reduce((s, r) => s + hoursOf(r.start_time, r.end_time) * r.persons, 0);
+    const photos = await Promise.all(rgs.map(r => S.photoUrl(r.photo_path)));
+
+    main.innerHTML = `
+      <div class="card daybar">
+        <button type="button" class="ghost small" id="d-prev" aria-label="Vortag">‹</button>
+        <label class="dfield"><span class="sr">Datum</span><input type="date" id="d-date" value="${date}"></label>
+        <button type="button" class="ghost small" id="d-next" aria-label="Nächster Tag">›</button>
+        ${date !== today() ? `<button type="button" class="ghost small" id="d-today">Heute</button>` : ''}
+      </div>
+      <div class="kpis">
+        <div class="kpi"><span>Mannstunden gesamt</span><b>${h(mhWork)}</b></div>
+        <div class="kpi"><span>davon Regie</span><b>${h(mhRegie)}</b></div>
+        <a class="kpi link" href="#/tag/${date}/${encodeURIComponent(tower.park)}"><span>Tagesbericht</span><b>Anzeigen →</b></a>
+      </div>
+
+      <section class="card sec">
+        <h2>Arbeitszeit</h2>
+        <p class="muted small">Gesamte Zeit vor Ort an diesem Turm. Ein Eintrag pro Truppe oder pro Zeitblock.</p>
+        ${wds.length ? `<ul class="entries">${wds.map(w => { const hh = hoursOf(w.start_time, w.end_time, w.pause_min); return `<li>
+          <div class="row between"><b class="mono">${esc(w.start_time)}–${esc(w.end_time)}</b><span class="num">${h(hh)} h × ${w.persons} = <b>${h(hh * w.persons)} Mh</b></span></div>
+          <div class="muted small">${w.persons} Personen${w.names ? ': ' + esc(w.names) : ''} · Pause ${w.pause_min} min${w.weather ? ' · ' + esc(w.weather) : ''}</div>
+          ${w.activities ? `<p class="small">${esc(w.activities)}</p>` : ''}
+          <div class="row between"><span class="muted small">eingetragen von ${esc(w.created_by_name)}</span><button type="button" class="ghost small" data-delw="${w.id}">Löschen</button></div></li>`; }).join('')}</ul>` : ''}
+        <form id="f-work" class="subform">
+          <div class="three">
+            <label class="fld">Von<input type="time" id="w-start" value="07:00" required></label>
+            <label class="fld">Bis<input type="time" id="w-end" value="17:00" required></label>
+            <label class="fld">Pause (min)<input type="number" id="w-pause" value="30" min="0" step="5" inputmode="numeric"></label>
+          </div>
+          <div class="two">
+            <label class="fld">Personen<input type="number" id="w-pers" value="2" min="1" required inputmode="numeric"></label>
+            <label class="fld">Wetter (optional)<input id="w-weather" placeholder="z.B. trocken, 8 °C"></label>
+          </div>
+          <label class="fld">Namen<input id="w-names" placeholder="z.B. Andy, Kilian"></label>
+          <label class="fld">Tätigkeiten / Bemerkungen<textarea id="w-act" rows="2" placeholder="z.B. Gitterscheiben C05 bis C12, Wartezeit Kran 1 h"></textarea></label>
+          <button class="primary" type="submit">Arbeitszeit speichern</button>
+        </form>
+      </section>
+
+      <section class="card sec regie">
+        <h2>Regiearbeiten</h2>
+        <p class="muted small">Arbeiten außerhalb des Auftrags, die vor Ort angeordnet wurden. Sie stehen im Tagesbericht extra und sind Teil der Gesamtzeit oben.</p>
+        ${rgs.length ? `<ul class="entries">${rgs.map((r, i) => { const hh = hoursOf(r.start_time, r.end_time); return `<li>
+          <div class="row between"><b>${esc(r.description)}</b><span class="num">${h(hh)} h × ${r.persons} = <b>${h(hh * r.persons)} Mh</b></span></div>
+          <div class="muted small"><span class="mono">${esc(r.start_time)}–${esc(r.end_time)}</span>${r.ordered_by ? ' · angeordnet von ' + esc(r.ordered_by) : ''}${r.material ? ' · Material: ' + esc(r.material) : ''}</div>
+          ${photos[i] ? `<a href="${esc(photos[i])}" target="_blank" rel="noopener"><img class="thumb" src="${esc(photos[i])}" alt="Foto Regiearbeit" loading="lazy"></a>` : ''}
+          <div class="row between"><span class="muted small">eingetragen von ${esc(r.created_by_name)}</span><button type="button" class="ghost small" data-delr="${r.id}">Löschen</button></div></li>`; }).join('')}</ul>` : ''}
+        <form id="f-regie" class="subform">
+          <label class="fld">Was wurde gemacht?<input id="r-desc" required placeholder="z.B. Kabelrinne C03 versetzt"></label>
+          <label class="fld">Angeordnet von<input id="r-by" placeholder="Name, Firma (z.B. Polier Max Bögl)"></label>
+          <div class="three">
+            <label class="fld">Von<input type="time" id="r-start" required></label>
+            <label class="fld">Bis<input type="time" id="r-end" required></label>
+            <label class="fld">Personen<input type="number" id="r-pers" value="2" min="1" required inputmode="numeric"></label>
+          </div>
+          <label class="fld">Material (optional)<input id="r-mat" placeholder="z.B. 4× Spreizanker M12"></label>
+          <label class="fld">Foto (optional)<input id="r-photo" type="file" accept="image/*" capture="environment"></label>
+          <button class="primary" type="submit">Regie speichern</button>
+        </form>
+      </section>
+
+      <section class="card sec">
+        <h2>Heute erledigt</h2>
+        <p class="muted small">Automatisch aus den abgehakten Punkten an diesem Tag.</p>
+        ${done.length ? `<ul class="donelist">${done.map(d => `<li><span class="muted small">${esc(d.phase)} · ${esc(d.section)}</span>${esc(d.text)}</li>`).join('')}</ul>` : '<p class="muted">An diesem Tag wurde noch nichts abgehakt.</p>'}
+        ${dayDefects.length ? `<p class="small"><b>Neue Mängel:</b> ${dayDefects.map(d => esc(d.title)).join(' · ')}</p>` : ''}
+      </section>`;
+
+    const go = d => { selDay = d; viewTower(tower.id, 'tag'); };
+    document.getElementById('d-date').onchange = e => e.target.value && go(e.target.value);
+    document.getElementById('d-prev').onclick = () => go(shiftDay(date, -1));
+    document.getElementById('d-next').onclick = () => go(shiftDay(date, 1));
+    const dt = document.getElementById('d-today'); if (dt) dt.onclick = () => go(today());
+    main.querySelectorAll('form').forEach(f => f.addEventListener('focusin', () => f.classList.add('editing')));
+
+    const v = id => document.getElementById(id).value.trim();
+    document.getElementById('f-work').onsubmit = e => {
+      e.preventDefault();
+      safe(async () => {
+        await S.addWorkday({ tower_id: tower.id, work_date: date, start_time: v('w-start'), end_time: v('w-end'), pause_min: +v('w-pause') || 0, persons: +v('w-pers') || 1, names: v('w-names'), activities: v('w-act'), weather: v('w-weather') });
+        toast('Arbeitszeit gespeichert'); viewTower(tower.id, 'tag');
+      });
+    };
+    const fr = document.getElementById('f-regie');
+    fr.onsubmit = e => {
+      e.preventDefault();
+      const btn = fr.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Speichere …';
+      safe(async () => {
+        const file = document.getElementById('r-photo').files[0];
+        const blob = file ? await compress(file, S.mode === 'demo' ? 800 : 1600) : null;
+        await S.addRegie({ tower_id: tower.id, work_date: date, description: v('r-desc'), ordered_by: v('r-by'), start_time: v('r-start'), end_time: v('r-end'), persons: +v('r-pers') || 1, material: v('r-mat') }, blob);
+        toast('Regie gespeichert'); viewTower(tower.id, 'tag');
+      }).finally(() => { btn.disabled = false; btn.textContent = 'Regie speichern'; });
+    };
+    main.querySelectorAll('[data-delw]').forEach(b => twoTap(b, 'Löschen', () => safe(async () => { await S.deleteWorkday(b.dataset.delw); viewTower(tower.id, 'tag'); })));
+    main.querySelectorAll('[data-delr]').forEach(b => twoTap(b, 'Löschen', () => safe(async () => { await S.deleteRegie(b.dataset.delr); viewTower(tower.id, 'tag'); })));
+  }
+
+  // ---------- Tagesbericht je Windpark und Datum (druckbar) ----------
+  async function viewDayReport(date, park) {
+    const towers = (await S.listTowers()).filter(t => t.park === park).sort((a, b) => a.name.localeCompare(b.name, 'de', { numeric: true }));
+    const ids = towers.map(t => t.id);
+    const [wds, rgs, allDef, checksArr] = await Promise.all([
+      ids.length ? S.listWorkdays({ towerIds: ids, date }) : [], ids.length ? S.listRegie({ towerIds: ids, date }) : [],
+      S.listDefects({}), Promise.all(towers.map(t => S.getChecks(t.id)))
+    ]);
+    let totWork = 0, totRegie = 0;
+    const rows = towers.map((t, i) => {
+      const tpl = T[t.tower_type];
+      const w = wds.filter(x => x.tower_id === t.id), r = rgs.filter(x => x.tower_id === t.id);
+      const dc = checksArr[i].filter(c => isoDay(c.done_at) === date);
+      const done = tpl ? ['wls', 'fin'].flatMap(p => window.summarizeDay(tpl, p, dc).map(x => ({ ...x, phase: tpl.phases[p].title }))) : [];
+      const def = allDef.filter(d => d.tower_id === t.id && isoDay(d.created_at) === date);
+      const mw = w.reduce((s, x) => s + hoursOf(x.start_time, x.end_time, x.pause_min) * x.persons, 0);
+      const mr = r.reduce((s, x) => s + hoursOf(x.start_time, x.end_time) * x.persons, 0);
+      totWork += mw; totRegie += mr;
+      return { t, w, r, done, def, mw, mr, any: w.length || r.length || done.length || def.length };
+    }).filter(x => x.any);
+
+    const text = () => [
+      `TAGESBERICHT ${dayLabel(date)}`, `${park} · Deliri GmbH`, '',
+      ...rows.flatMap(x => [
+        `${x.t.name} (${T[x.t.tower_type]?.name || ''})`,
+        ...x.w.map(w => `  Arbeitszeit ${w.start_time}–${w.end_time}, Pause ${w.pause_min} min, ${w.persons} Pers.${w.names ? ' (' + w.names + ')' : ''} = ${h(hoursOf(w.start_time, w.end_time, w.pause_min) * w.persons)} Mh${w.activities ? '\n  ' + w.activities : ''}`),
+        ...x.done.map(d => `  Erledigt ${d.section}: ${d.text}`),
+        ...x.r.map(r => `  REGIE ${r.start_time}–${r.end_time}, ${r.persons} Pers. = ${h(hoursOf(r.start_time, r.end_time) * r.persons)} Mh: ${r.description}${r.ordered_by ? ' (angeordnet von ' + r.ordered_by + ')' : ''}${r.material ? ', Material: ' + r.material : ''}`),
+        ...x.def.map(d => `  Mangel: ${d.title}${d.location ? ', ' + d.location : ''}${d.needs_part ? ', Teil: ' + d.needs_part : ''}`), ''
+      ]),
+      `Mannstunden gesamt: ${h(totWork)} · davon Regie: ${h(totRegie)} · Auftrag: ${h(Math.max(0, totWork - totRegie))}`
+    ].join('\n');
+
+    app.innerHTML = `<div class="noprint">${header('<div class="sub">Tagesbericht</div><div class="brand sm">' + esc(park) + '</div>', '#/')}</div>
+      <main class="wrap report">
+        <div class="row between noprint wrapgap">
+          <div class="row"><a class="ghost small" href="#/tag/${shiftDay(date, -1)}/${encodeURIComponent(park)}" aria-label="Vortag">‹</a>
+            <input type="date" id="rp-date" value="${date}" aria-label="Datum">
+            <a class="ghost small" href="#/tag/${shiftDay(date, 1)}/${encodeURIComponent(park)}" aria-label="Nächster Tag">›</a></div>
+          <div class="row"><button class="ghost" type="button" id="rp-copy">Text kopieren</button><button class="primary" type="button" onclick="window.print()">Drucken / PDF</button></div>
+        </div>
+        <div class="rephead">
+          <div><div class="eyebrow">Deliri GmbH · Tagesbericht</div><h1>${esc(dayLabel(date))}</h1><p class="muted">${esc(park)}${towers[0]?.customer ? ' · Auftraggeber ' + esc(towers[0].customer) : ''}</p></div>
+          <dl class="totals"><dt>Mannstunden gesamt</dt><dd>${h(totWork)}</dd><dt>davon Regie</dt><dd>${h(totRegie)}</dd><dt>Auftrag</dt><dd>${h(Math.max(0, totWork - totRegie))}</dd></dl>
+        </div>
+        ${totRegie > totWork ? '<p class="warn small">Regiestunden sind höher als die eingetragene Gesamtzeit. Bitte Arbeitszeit prüfen.</p>' : ''}
+        ${rows.length ? rows.map(x => `<section class="reptower">
+          <h2>${esc(x.t.name)} <span class="muted small">${esc(T[x.t.tower_type]?.name || '')}</span></h2>
+          ${x.w.length ? `<table class="rep"><thead><tr><th>Zeit</th><th>Pause</th><th>Pers.</th><th>Namen</th><th class="r">Mh</th></tr></thead><tbody>${x.w.map(w => `<tr><td class="mono">${esc(w.start_time)}–${esc(w.end_time)}</td><td>${w.pause_min} min</td><td>${w.persons}</td><td>${esc(w.names)}</td><td class="r num">${h(hoursOf(w.start_time, w.end_time, w.pause_min) * w.persons)}</td></tr>${w.activities ? `<tr class="sub"><td colspan="5">${esc(w.activities)}</td></tr>` : ''}`).join('')}</tbody></table>` : '<p class="warn small">Keine Arbeitszeit eingetragen.</p>'}
+          ${x.done.length ? `<h3>Erledigt</h3><ul class="donelist">${x.done.map(d => `<li><span class="muted small">${esc(d.section)}</span>${esc(d.text)}</li>`).join('')}</ul>` : ''}
+          ${x.r.length ? `<h3>Regiearbeiten</h3><table class="rep"><thead><tr><th>Zeit</th><th>Tätigkeit</th><th>Angeordnet von</th><th>Pers.</th><th class="r">Mh</th></tr></thead><tbody>${x.r.map(r => `<tr><td class="mono">${esc(r.start_time)}–${esc(r.end_time)}</td><td>${esc(r.description)}${r.material ? '<br><span class="muted">Material: ' + esc(r.material) + '</span>' : ''}</td><td>${esc(r.ordered_by)}</td><td>${r.persons}</td><td class="r num">${h(hoursOf(r.start_time, r.end_time) * r.persons)}</td></tr>`).join('')}</tbody></table>` : ''}
+          ${x.def.length ? `<h3>Neue Mängel</h3><ul class="donelist">${x.def.map(d => `<li>${esc(d.title)}${d.location ? ' · ' + esc(d.location) : ''}${d.needs_part ? ' · Teil: ' + esc(d.needs_part) : ''}</li>`).join('')}</ul>` : ''}
+        </section>`).join('') : `<div class="card empty"><p><b>Für diesen Tag ist noch nichts eingetragen.</b></p><p class="muted">Arbeitszeit und Regie trägt das Team im Turm unter „Tag“ ein.</p></div>`}
+        ${rows.length ? `<div class="signs"><div><span></span>Deliri GmbH, Name / Unterschrift</div><div><span></span>Auftraggeber, Name / Unterschrift</div></div>` : ''}
+      </main>`;
+    bindLogout();
+    document.getElementById('rp-date').onchange = e => { if (e.target.value) location.hash = '#/tag/' + e.target.value + '/' + encodeURIComponent(park); };
+    document.getElementById('rp-copy').onclick = async () => {
+      try { await navigator.clipboard.writeText(text()); toast('Text kopiert, z.B. für E-Mail oder WhatsApp'); }
+      catch (e) { const ta = document.createElement('textarea'); ta.value = text(); document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Text kopiert'); }
+    };
+  }
+
   // ---------- Protokoll (druckbar) ----------
   async function viewReport(id) {
     const tower = await S.getTower(id); const tpl = T[tower.tower_type];
@@ -345,8 +536,9 @@
       if (parts[0] === 'neu') await viewNew();
       else if (parts[0] === 't' && parts[1]) {
         if (parts[2] === 'protokoll') await viewReport(parts[1]);
-        else await viewTower(parts[1], ['wls', 'fin', 'maengel', 'info'].includes(parts[2]) ? parts[2] : 'wls');
-      } else await viewHome();
+        else await viewTower(parts[1], ['tag', 'wls', 'fin', 'maengel', 'info'].includes(parts[2]) ? parts[2] : 'tag');
+      } else if (parts[0] === 'tag' && parts[1] && parts[2]) await viewDayReport(parts[1], decodeURIComponent(parts[2]));
+      else await viewHome();
     } catch (e) { console.error(e); app.innerHTML = header('<div class="sub">Fehler</div>', '#/') + `<main class="wrap"><div class="card"><p><b>Daten konnten nicht geladen werden.</b></p><p class="muted">${esc(e.message || e)}</p><p>Internetverbindung prüfen und Seite neu laden.</p></div></main>`; }
     window.scrollTo(0, 0);
   }
