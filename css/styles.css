@@ -2,7 +2,7 @@
    Layout: Handy zuerst, eine Spalte, Kopfzeile fix, Karten nur für echte Einheiten. */
 :root{
   --bg:#f3f4f1; --paper:#ffffff; --ink:#151a24; --muted:#5f6675; --line:#dcdfe3;
-  --navy:#14213d; --yellow:#ffc300; --blue:#2f6bff;
+  --navy:#14213d; --yellow:#ffd43f; --blue:#1d98ed;
   --ok:#23804c; --ok-soft:#dff1e6; --bad:#c2410c; --bad-soft:#fde8dc; --warn:#946200; --warn-soft:#fdf2cf;
   --f-head:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
   --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -38,9 +38,8 @@ header.top{background:var(--navy);color:#fff;position:sticky;top:0;z-index:20;pa
 .brand{font-family:var(--f-head);font-weight:800;font-size:24px;letter-spacing:.06em;line-height:1}
 .brand.sm{font-size:22px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sub{font-size:13px;opacity:.75;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.logo{position:relative;width:36px;height:36px;flex:none}
-.logo b{display:grid;place-items:center;width:36px;height:36px;background:var(--yellow);color:var(--navy);font-family:var(--f-head);font-weight:800;font-size:26px;border-radius:4px 18px 18px 4px}
-.logo i{position:absolute;right:-3px;bottom:-3px;width:12px;height:12px;border-radius:50%;background:var(--blue);border:2px solid var(--navy)}
+.logo{width:auto;height:36px;flex:none;display:block}
+.biglogo{width:96px;height:auto;display:block}
 .back{font-size:26px;text-decoration:none;width:36px;height:36px;display:grid;place-items:center;border-radius:6px}
 .back:hover{background:rgba(255,255,255,.1)}
 header .ghost{color:#fff;border-color:rgba(255,255,255,.3);background:transparent}

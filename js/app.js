@@ -60,7 +60,7 @@
   }
   function header(inner, back) {
     return `<header class="top"><div class="wrap topin">
-      ${back ? `<a class="back" href="${back}" aria-label="Zurück">←</a>` : `<span class="logo" aria-hidden="true"><b>D</b><i></i></span>`}
+      ${back ? `<a class="back" href="${back}" aria-label="Zurück">←</a>` : `<img class="logo" src="img/logo-96.png" alt="Deliri" width="34" height="36">`}
       <div class="ttl">${inner}</div>
       ${S.user() ? `<button class="ghost small" id="logout" type="button">Abmelden</button>` : ''}
     </div></header>
@@ -73,6 +73,7 @@
     app.innerHTML = `${header('<div class="brand">DELIRI</div><div class="sub">Turm-App</div>')}
     <main class="wrap narrow">
       <form class="card" id="f-login">
+        <img class="biglogo" src="img/logo-240.png" alt="Deliri" width="96" height="100">
         <h1>Anmelden</h1>
         <p class="muted">${S.mode === 'demo' ? 'Im Demo-Modus reicht ein Name oder eine E-Mail.' : 'Du bekommst einen Anmeldelink per E-Mail. Oder mit Passwort, falls eines vergeben wurde.'}</p>
         <label class="fld">E-Mail<input id="l-email" type="${S.mode === 'demo' ? 'text' : 'email'}" required autocomplete="email" placeholder="name@deliri.at"></label>
