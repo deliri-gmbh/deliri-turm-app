@@ -1,0 +1,10 @@
+{
+  "name": "Deliri Turm-App",
+  "short_name": "Turm-App",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f3f4f1",
+  "theme_color": "#14213d",
+  "lang": "de",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
