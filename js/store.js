@@ -40,6 +40,11 @@
         else ok(await sb.from('checks').delete().match({ tower_id: towerId, phase, item_id: itemId }));
       },
 
+      async setChecks(towerId, phase, itemIds) {
+        const at = new Date().toISOString(), by = nameOf(user);
+        ok(await sb.from('checks').upsert(itemIds.map(item_id => ({ tower_id: towerId, phase, item_id, done: true, value: '', done_by_name: by, done_at: at }))));
+      },
+
       async getSignoffs(towerId) { return ok(await sb.from('signoffs').select('*').eq('tower_id', towerId).order('signed_at')); },
       async addSignoff(s) { return ok(await sb.from('signoffs').insert(s).select().single()); },
 
@@ -126,6 +131,13 @@
       async setCheck(towerId, phase, itemId, done, value = '') {
         db.checks = db.checks.filter(c => !(c.tower_id === towerId && c.phase === phase && c.item_id === itemId));
         if (done) db.checks.push({ tower_id: towerId, phase, item_id: itemId, done: true, value, done_by_name: db.user?.name || '', done_at: now() });
+        save();
+      },
+
+      async setChecks(towerId, phase, itemIds) {
+        const ids = new Set(itemIds), at = now();
+        db.checks = db.checks.filter(c => !(c.tower_id === towerId && c.phase === phase && ids.has(c.item_id)));
+        itemIds.forEach(item_id => db.checks.push({ tower_id: towerId, phase, item_id, done: true, value: '', done_by_name: db.user?.name || '', done_at: at }));
         save();
       },
 

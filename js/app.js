@@ -23,7 +23,7 @@
   function twoTap(btn, label, fn) {
     let armed = false;
     btn.onclick = () => {
-      if (!armed) { armed = true; btn.textContent = 'Wirklich? Nochmal tippen'; btn.classList.add('danger'); setTimeout(() => { armed = false; btn.textContent = label; btn.classList.remove('danger'); }, 4000); return; }
+      if (!armed) { armed = true; btn.textContent = btn.dataset.all !== undefined ? 'Wirklich alle abhaken? Nochmal tippen' : 'Wirklich? Nochmal tippen'; btn.classList.add('danger'); setTimeout(() => { armed = false; btn.textContent = label; btn.classList.remove('danger'); }, 4000); return; }
       fn();
     };
   }
@@ -197,9 +197,15 @@
     const who = c => c ? `<span class="who">${esc(c.done_by_name)} · ${fmt(c.done_at)}</span>` : '';
 
     let html = `<div class="card sum"><div class="row between"><h1>${esc(ph.title)}</h1><span class="num big">${done}/${items.length}</span></div>${bar(pct(done, items.length))}</div>`;
+    const matrixOpen = [];
     ph.sections.forEach(sec => {
       html += `<section class="card sec"><h2>${esc(sec.title)}</h2>${sec.note ? `<p class="muted small">${esc(sec.note)}</p>` : ''}`;
       if (sec.type === 'matrix') {
+        const openKeys = sec.rows.flatMap(r => r.cells.map(c => r.id + '-' + c)).filter(k => !map.has(k));
+        const mi = matrixOpen.push(openKeys) - 1;
+        html += openKeys.length
+          ? `<div class="allbar"><button type="button" class="ghost allbtn" data-all="${mi}">Alle abhaken (${openKeys.length} offene Felder)</button><span class="muted small">Nur wenn wirklich alle Ringe passen. Einzelne Felder lassen sich danach wieder abwählen.</span></div>`
+          : `<p class="okmsg small">Alle Felder dieser Matrix erledigt.</p>`;
         html += `<div class="tblwrap"><table class="mx"><thead><tr><th class="l">Ring</th><th class="l">Teil</th>${sec.cols.map(c => `<th title="${esc(c.help)}">${esc(c.label)}</th>`).join('')}</tr></thead><tbody>`;
         sec.rows.forEach(r => {
           const all = r.cells.every(c => map.has(r.id + '-' + c));
@@ -237,6 +243,15 @@
       </form></section>`;
     main.innerHTML = html;
 
+    main.querySelectorAll('[data-all]').forEach(btn => {
+      const keys = matrixOpen[+btn.dataset.all], label = btn.textContent;
+      twoTap(btn, label, () => safe(async () => {
+        btn.disabled = true; btn.textContent = 'Speichere …';
+        await S.setChecks(tower.id, phase, keys);
+        toast(keys.length + ' Felder abgehakt');
+        viewTower(tower.id, phase);
+      }));
+    });
     main.querySelectorAll('input.ck').forEach(cb => cb.onchange = () => safe(async () => {
       cb.disabled = true;
       await S.setCheck(tower.id, phase, cb.dataset.k, cb.checked);
