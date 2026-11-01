@@ -209,6 +209,60 @@ table.rep tr.sub td{color:var(--muted);font-size:12px;border-bottom:1px solid va
 .signs{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:40px;font-size:13px;color:var(--muted)}
 .signs span{display:block;border-bottom:1px solid var(--ink);height:40px;margin-bottom:6px}
 
+/* Hauptnavigation, Team, Zeiterfassung */
+.mainnav a{font-size:17px}
+.crew{border:1px solid var(--line);border-radius:8px;padding:10px 12px 12px;margin:0;display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.crew legend{font-size:14px;font-weight:600;color:var(--muted);padding:0 4px}
+.crewchip{position:relative;cursor:pointer}
+.crewchip input{position:absolute;opacity:0;width:1px;height:1px}
+.crewchip span{display:inline-flex;align-items:center;gap:4px;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--paper);font-weight:500;min-height:40px}
+.crewchip small{font-size:11px;color:var(--muted)}
+.crewchip input:checked + span{background:var(--navy);color:#fff;border-color:var(--navy)}
+.crewchip input:checked + span small{color:var(--yellow)}
+.crewchip input:focus-visible + span{outline:3px solid var(--blue);outline-offset:2px}
+.kindpick{display:flex;flex-wrap:wrap;gap:8px}
+#f-time[data-kind=arbeit] .only-abs,#f-time[data-kind=abs] .only-work{display:none!important}
+.startvals .three{width:100%}
+.clock{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px;border-top:4px solid var(--yellow)}
+.clockbig{font-family:var(--f-head);font-size:44px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;margin:4px 0}
+.clockbig .muted{font-size:18px;font-weight:600}
+.clockbtns{display:flex;gap:8px;flex-wrap:wrap}
+.clockbtns .primary{min-width:150px}
+.primary.dark{background:var(--navy);color:#fff}
+.monthname{flex:1;text-align:center;font-family:var(--f-head);font-size:20px}
+.kpis.five{grid-template-columns:repeat(5,1fr)}
+@media (max-width:640px){.kpis.five{grid-template-columns:repeat(2,1fr)}.kpis.five .kpi:last-child{grid-column:span 2}}
+.kpi small{font-size:12px;color:var(--muted)}
+.kpi.pos b{color:var(--ok)} .kpi.neg b{color:var(--bad)}
+.kpiline{margin-top:-4px}
+.nowrap{white-space:nowrap}
+table.timetbl td{vertical-align:top}
+table.timetbl tr.warnrow td{background:var(--warn-soft);color:var(--warn);font-size:12px;font-weight:600}
+table.timetbl tr.weekrow td{background:var(--bg);font-size:13px;color:var(--muted)}
+table.timetbl tr.holrow td{background:var(--bg)}
+table.rep tfoot td{border-top:2px solid var(--ink);padding-top:6px}
+.pill.k-urlaub{background:#dcefff;color:#0b5aa0}
+.pill.k-krank{background:var(--bad-soft);color:var(--bad)}
+.pill.k-za{background:var(--warn-soft);color:var(--warn)}
+.pill.k-schulung{background:var(--ok-soft);color:var(--ok)}
+.negt{color:var(--bad)}
+table.teamtbl{min-width:760px}
+table.teamtbl td,table.teamtbl th{white-space:nowrap}
+.entries li.inactive{opacity:.55}
+.loglist{margin:8px 0 0;padding-left:18px;display:grid;gap:4px;color:var(--ink)}
+details summary{cursor:pointer}
+.printonly{display:none}
+@media print{
+  .printonly{display:block}
+  .signs.printonly{display:grid}
+  header.top,.mainnav,.demo{display:none!important}
+  .card{border:0;padding:0}
+  .kpis{gap:6px}.kpi{padding:6px 8px}.kpi b{font-size:18px}
+  table.timetbl,table.teamtbl{font-size:10px;min-width:0}
+  .tblwrap{overflow:visible;margin:0;padding:0}
+}
+
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom));background:var(--navy);color:#fff;padding:12px 18px;border-radius:8px;z-index:50;max-width:calc(100% - 32px);box-shadow:0 6px 24px rgba(0,0,0,.25)}
 .toast.bad{background:var(--bad)}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+table.timetbl td:first-child,table.teamtbl td:first-child{width:auto;text-align:left}

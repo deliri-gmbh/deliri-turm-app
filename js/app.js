@@ -66,6 +66,11 @@
     </div></header>
     ${S.mode === 'demo' ? `<div class="demo wrap">Demo-Modus: Daten bleiben nur auf diesem Gerät. Für das Team Supabase einrichten (siehe Anleitung).</div>` : ''}`;
   }
+  function topnav(active) {
+    const items = [['tuerme', '#/', 'Türme'], ['zeit', '#/zeit', 'Meine Zeit']];
+    if (S.user()?.isAdmin) items.push(['team', '#/team', 'Team']);
+    return `<nav class="tabs wrap mainnav">${items.map(([k, href, l]) => `<a href="${href}" aria-selected="${k === active}">${l}</a>`).join('')}</nav>`;
+  }
   function bindLogout() { const b = document.getElementById('logout'); if (b) b.onclick = async () => { await S.signOut(); location.hash = '#/'; render(); }; }
 
   // ---------- Login ----------
@@ -106,7 +111,7 @@
 
   // ---------- Start ----------
   async function viewHome() {
-    app.innerHTML = header('<div class="brand">DELIRI</div><div class="sub">Turm-App</div>') + `<main class="wrap"><p class="muted">Lade …</p></main>`;
+    app.innerHTML = header('<div class="brand">DELIRI</div><div class="sub">Turm-App</div>') + topnav('tuerme') + `<main class="wrap"><p class="muted">Lade …</p></main>`;
     bindLogout();
     const [towers, checks, defects] = await Promise.all([S.listTowers(), S.allChecks(), S.listDefects({ status: 'offen' })]);
     const list = towers.filter(t => homeFilter === 'alle' || t.status === homeFilter);
@@ -352,7 +357,9 @@
   // ---------- Reiter Tag: Arbeitszeit, Regie, heute erledigt ----------
   async function renderDay(main, tower, tpl, checks, defects) {
     const date = selDay;
-    const [wds, rgs] = await Promise.all([S.listWorkdays({ towerIds: [tower.id], date }), S.listRegie({ towerIds: [tower.id], date })]);
+    const [wds, rgs, profiles] = await Promise.all([S.listWorkdays({ towerIds: [tower.id], date }), S.listRegie({ towerIds: [tower.id], date }), S.listProfiles()]);
+    const team = profiles.filter(p => p.active);
+    const myId = S.user().profileId;
     const dayChecks = checks.filter(c => isoDay(c.done_at) === date);
     const done = ['wls', 'fin'].flatMap(p => window.summarizeDay(tpl, p, dayChecks).map(x => ({ ...x, phase: tpl.phases[p].title })));
     const dayDefects = defects.filter(d => isoDay(d.created_at) === date);
@@ -375,7 +382,7 @@
 
       <section class="card sec">
         <h2>Arbeitszeit</h2>
-        <p class="muted small">Gesamte Zeit vor Ort an diesem Turm. Ein Eintrag pro Truppe oder pro Zeitblock.</p>
+        <p class="muted small">Gesamte Zeit vor Ort an diesem Turm. Ein Eintrag pro Truppe oder Zeitblock. Wer ausgewählt ist, bekommt die Zeit unter „Meine Zeit“ als Vorschlag.</p>
         ${wds.length ? `<ul class="entries">${wds.map(w => { const hh = hoursOf(w.start_time, w.end_time, w.pause_min); return `<li>
           <div class="row between"><b class="mono">${esc(w.start_time)}–${esc(w.end_time)}</b><span class="num">${h(hh)} h × ${w.persons} = <b>${h(hh * w.persons)} Mh</b></span></div>
           <div class="muted small">${w.persons} Personen${w.names ? ': ' + esc(w.names) : ''} · Pause ${w.pause_min} min</div>
@@ -387,8 +394,10 @@
             <label class="fld">Bis<input type="time" id="w-end" value="17:00" required></label>
             <label class="fld">Pause (min)<input type="number" id="w-pause" value="30" min="0" step="5" inputmode="numeric"></label>
           </div>
-          <label class="fld">Personen<input type="number" id="w-pers" value="2" min="1" required inputmode="numeric"></label>
-          <label class="fld">Namen<input id="w-names" placeholder="z.B. Andy, Kilian"></label>
+          <fieldset class="crew"><legend>Wer war dabei?</legend>
+            ${team.length ? team.map(p => `<label class="crewchip"><input type="checkbox" name="crew" value="${p.id}" ${p.id === myId ? 'checked' : ''}><span>${esc(p.name)}${p.kind === 'sub' ? ' <small>Sub</small>' : ''}</span></label>`).join('') : '<p class="muted small">Noch keine Mitarbeiter angelegt (Bereich Team).</p>'}
+          </fieldset>
+          <label class="fld">Weitere Personen ohne App<input type="number" id="w-extra" value="0" min="0" inputmode="numeric"></label>
           <label class="fld">Tätigkeiten / Bemerkungen<textarea id="w-act" rows="2" placeholder="z.B. Gitterscheiben C05 bis C12 montiert"></textarea></label>
           <button class="primary" type="submit">Arbeitszeit speichern</button>
         </form>
@@ -435,7 +444,11 @@
     document.getElementById('f-work').onsubmit = e => {
       e.preventDefault();
       safe(async () => {
-        await S.addWorkday({ tower_id: tower.id, work_date: date, start_time: v('w-start'), end_time: v('w-end'), pause_min: +v('w-pause') || 0, persons: +v('w-pers') || 1, names: v('w-names'), activities: v('w-act') });
+        const crew = [...document.querySelectorAll('input[name=crew]:checked')].map(i => i.value);
+        const extra = +v('w-extra') || 0;
+        if (!crew.length && !extra) { toast('Bitte auswählen, wer dabei war.', true); return; }
+        const names = crew.map(id => team.find(p => p.id === id)?.name).filter(Boolean).join(', ') + (extra ? (crew.length ? ' + ' : '') + extra + ' weitere' : '');
+        await S.addWorkday({ tower_id: tower.id, work_date: date, start_time: v('w-start'), end_time: v('w-end'), pause_min: +v('w-pause') || 0, persons: crew.length + extra, names, crew, activities: v('w-act') });
         toast('Arbeitszeit gespeichert'); viewTower(tower.id, 'tag');
       });
     };
@@ -517,6 +530,447 @@
     };
   }
 
+  // ---------- Arbeitszeit: Helfer ----------
+  const nowHM = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const toMin = t => { const [a, b] = String(t || '0:0').split(':').map(Number); return a * 60 + b; };
+  const daysIn = m => new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
+  const shiftMonth = (m, n) => { const d = new Date(+m.slice(0, 4), +m.slice(5, 7) - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+  const monthLabel = m => new Date(+m.slice(0, 4), +m.slice(5, 7) - 1, 15).toLocaleDateString('de-AT', { month: 'long', year: 'numeric' });
+  const wd = s => new Date(s + 'T12:00').toLocaleDateString('de-AT', { weekday: 'short' });
+  const hm = min => { const neg = min < 0, m = Math.round(Math.abs(min)); return (neg ? '−' : '') + Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
+  const hmSigned = min => (min > 0 ? '+' : '') + hm(min);
+  const dec = (n, d = 2) => (Math.round(n * 10 ** d) / 10 ** d).toLocaleString('de-AT', { maximumFractionDigits: d });
+  const kw = s => { const d = new Date(s + 'T12:00'); d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); const w1 = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - w1) / 864e5 - 3 + ((w1.getDay() + 6) % 7)) / 7); };
+  const KINDS = { arbeit: 'Arbeit', schulung: 'Schulung', urlaub: 'Urlaub', krank: 'Krankenstand', za: 'Zeitausgleich' };
+  const ABSENT = k => k === 'urlaub' || k === 'krank' || k === 'za';
+
+  // Gesetzliche Feiertage Österreich
+  const holCache = {};
+  function holidaysAT(y) {
+    if (holCache[y]) return holCache[y];
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3),
+      hh = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - hh - k) % 7, m = Math.floor((a + 11 * hh + 22 * l) / 451),
+      mon = Math.floor((hh + l - 7 * m + 114) / 31), day = ((hh + l - 7 * m + 114) % 31) + 1;
+    const easter = isoDay(new Date(y, mon - 1, day)), plus = n => shiftDay(easter, n);
+    const map = new Map([[`${y}-01-01`, 'Neujahr'], [`${y}-01-06`, 'Heilige Drei Könige'], [plus(1), 'Ostermontag'], [`${y}-05-01`, 'Staatsfeiertag'],
+      [plus(39), 'Christi Himmelfahrt'], [plus(50), 'Pfingstmontag'], [plus(60), 'Fronleichnam'], [`${y}-08-15`, 'Mariä Himmelfahrt'],
+      [`${y}-10-26`, 'Nationalfeiertag'], [`${y}-11-01`, 'Allerheiligen'], [`${y}-12-08`, 'Mariä Empfängnis'], [`${y}-12-25`, 'Christtag'], [`${y}-12-26`, 'Stefanitag']]);
+    return (holCache[y] = map);
+  }
+  const holidayName = d => holidaysAT(+d.slice(0, 4)).get(d) || '';
+  const isWorkday = d => { const w = new Date(d + 'T12:00').getDay(); return w >= 1 && w <= 5 && !holidayName(d); };
+  const dailySoll = p => (+p.weekly_hours || 40) * 60 / 5;
+  const startOf = p => p.balance_date || (p.created_at ? p.created_at.slice(0, 8) + '01' : today().slice(0, 8) + '01');
+
+  // Arbeitsminuten eines Eintrags (laufende Einträge bis jetzt)
+  function workMin(e) {
+    if (ABSENT(e.kind)) return 0;
+    if (!e.start_time) return 0;
+    const end = e.end_time || (e.work_date === today() ? nowHM() : e.start_time);
+    let d = toMin(end) - toMin(e.start_time); if (d < 0) d += 1440;
+    let p = +e.pause_min || 0;
+    if (e.pause_started && !e.end_time) { let q = toMin(nowHM()) - toMin(e.pause_started); if (q < 0) q += 1440; p += q; }
+    return Math.max(0, d - p);
+  }
+  // Ist-Minuten für den Gleitzeitsaldo: Arbeit + Fahrzeit, Urlaub/Krankenstand mit Stunden gutgeschrieben, ZA = 0
+  const istMin = e => e.kind === 'urlaub' || e.kind === 'krank' ? (+e.hours || 0) * 60 : e.kind === 'za' ? 0 : workMin(e) + (+e.travel_min || 0);
+
+  // Tageswerte und Hinweise nach AZG
+  function dayStats(entries, prevEntries) {
+    const days = {};
+    entries.forEach(e => { (days[e.work_date] = days[e.work_date] || []).push(e); });
+    const lastEnd = list => { let best = null; list.forEach(e => { if (!e.end_time || !e.start_time) return; let end = toMin(e.end_time); if (end < toMin(e.start_time)) end += 1440; best = best === null ? end : Math.max(best, end); }); return best; };
+    const out = {};
+    Object.keys(days).sort().forEach(d => {
+      const list = days[d], timed = list.filter(e => !ABSENT(e.kind));
+      const work = timed.reduce((s, e) => s + workMin(e), 0), pause = timed.reduce((s, e) => s + (+e.pause_min || 0), 0);
+      const travel = timed.reduce((s, e) => s + (+e.travel_min || 0), 0), warn = [];
+      if (timed.length) {
+        if (work > 360 && pause < 30) warn.push('Pause unter 30 min bei über 6 h');
+        if (work > 600) warn.push('Über 10 h Arbeitszeit');
+        if (new Date(d + 'T12:00').getDay() === 0) warn.push('Arbeit am Sonntag');
+        if (holidayName(d)) warn.push('Arbeit am Feiertag');
+        if (timed.some(e => !e.end_time) && d < today()) warn.push('Nicht beendet, Endzeit fehlt');
+        const prev = shiftDay(d, -1), pl = (days[prev] || prevEntries.filter(e => e.work_date === prev)).filter(e => !ABSENT(e.kind));
+        const le = pl.length ? lastEnd(pl) : null, fs = Math.min(...timed.filter(e => e.start_time).map(e => toMin(e.start_time)));
+        if (le !== null && isFinite(fs) && (fs + 1440 - le) < 660) warn.push('Ruhezeit unter 11 h');
+      }
+      out[d] = { list, work, pause, travel, warn, overnight: list.some(e => e.overnight) };
+    });
+    return out;
+  }
+
+  // Konten: Gleitzeitsaldo und Urlaub ab Stichtag bis Monatsende
+  function accounts(p, entries, month) {
+    const start = startOf(p), mFrom = month + '-01', mTo = month + '-' + String(daysIn(month)).padStart(2, '0');
+    const ds = dailySoll(p), byDay = {};
+    entries.forEach(e => { if (e.work_date >= start && e.work_date <= mTo) (byDay[e.work_date] = byDay[e.work_date] || []).push(e); });
+    let saldoPrev = +p.saldo_start_min || 0, soll = 0, ist = 0;
+    for (let d = start; d <= mTo; d = shiftDay(d, 1)) {
+      const s = isWorkday(d) ? ds : 0, i = (byDay[d] || []).reduce((a, e) => a + istMin(e), 0);
+      if (d < mFrom) saldoPrev += i - s; else { soll += s; ist += i; }
+    }
+    // Monat vor Stichtag: keine Saldoberechnung
+    const active = mTo >= start;
+    const inMonth = entries.filter(e => e.work_date >= mFrom && e.work_date <= mTo);
+    const dayCount = k => inMonth.filter(e => e.kind === k).reduce((a, e) => a + (+e.hours || ds / 60) / (ds / 60), 0);
+    let vac = +p.vacation_start || 0;
+    for (let y = +start.slice(0, 4) + 1; y <= +month.slice(0, 4); y++) vac += +p.vacation_per_year || 0;
+    const usedTotal = entries.filter(e => e.kind === 'urlaub' && e.work_date >= start && e.work_date <= mTo).reduce((a, e) => a + (+e.hours || ds / 60) / (ds / 60), 0);
+    return {
+      active, start, soll, ist, diff: ist - soll, saldoPrev, saldoNew: saldoPrev + ist - soll,
+      vacUsed: dayCount('urlaub'), vacLeft: vac - usedTotal, sick: dayCount('krank'), za: dayCount('za'),
+      schulung: inMonth.filter(e => e.kind === 'schulung').reduce((a, e) => a + workMin(e), 0),
+      work: inMonth.filter(e => e.kind === 'arbeit').reduce((a, e) => a + workMin(e), 0),
+      travel: inMonth.reduce((a, e) => a + (+e.travel_min || 0), 0),
+      nights: new Set(inMonth.filter(e => e.overnight).map(e => e.work_date)).size
+    };
+  }
+
+  // ---------- Meine Zeit / Arbeitszeit eines Mitarbeiters ----------
+  async function viewTime(pid, month, printMode) {
+    const u = S.user();
+    if (!u.profileId) { app.innerHTML = header('<div class="sub">Meine Zeit</div>', '#/') + topnav('zeit') + '<main class="wrap"><div class="card"><p><b>Dein Login ist noch keinem Mitarbeiter zugeordnet.</b></p><p class="muted">Bitte melde dich bei Ali.</p></div></main>'; bindLogout(); return; }
+    pid = pid || u.profileId;
+    const self = pid === u.profileId;
+    if (!self && !u.isAdmin) { location.hash = '#/zeit'; return; }
+    month = month || today().slice(0, 7);
+    const from = month + '-01', to = month + '-' + String(daysIn(month)).padStart(2, '0');
+    const profiles = await S.listProfiles();
+    const person = profiles.find(p => p.id === pid) || { name: '?', weekly_hours: 40 };
+    const accFrom = startOf(person) < from ? startOf(person) : from;
+    const [allEntries, signs, towers, open] = await Promise.all([
+      S.listTime({ profileId: pid, from: shiftDay(accFrom, -1), to }), S.listMonthSignoffs({ month, profileId: pid }), S.listTowers(), S.openTime(pid)
+    ]);
+    const entries = allEntries.filter(e => e.work_date >= from), prevEntries = allEntries.filter(e => e.work_date === shiftDay(from, -1));
+    const acc = accounts(person, allEntries, month);
+    const sign = signs[0];
+    const locked = !!sign && !u.isAdmin;
+    const tName = id => { const t = towers.find(x => x.id === id); return t ? t.park + ' · ' + t.name : ''; };
+    const stats = dayStats(entries, prevEntries);
+    // Feiertage an Werktagen als Info-Zeilen
+    for (let d = from; d <= to; d = shiftDay(d, 1)) { const w = new Date(d + 'T12:00').getDay(); if (holidayName(d) && w >= 1 && w <= 5 && !stats[d]) stats[d] = { list: [], work: 0, pause: 0, travel: 0, warn: [], overnight: false }; }
+    const days = Object.keys(stats).sort();
+    const warnCount = days.reduce((s, d) => s + stats[d].warn.length, 0);
+    const changedAfter = sign && entries.some(e => new Date(e.updated_at) > new Date(sign.signed_at));
+    const weeks = {}; days.forEach(d => { const k = kw(d); weeks[k] = (weeks[k] || 0) + stats[d].work + stats[d].travel; });
+
+    // Vorschläge aus Turm-Einträgen (heute und gestern), nur für sich selbst
+    let suggestions = [];
+    if (self && month === today().slice(0, 7) && towers.length) {
+      const ids = towers.map(t => t.id), ds = [today(), shiftDay(today(), -1)];
+      const wl = (await Promise.all(ds.map(date => S.listWorkdays({ towerIds: ids, date })))).flat();
+      suggestions = wl.filter(w => (w.crew || []).includes(pid) && !entries.some(e => e.work_date === w.work_date && e.tower_id === w.tower_id));
+    }
+
+    const back = self ? '#/' : '#/team/' + month;
+    const editable = !locked;
+    const towerOpts = sel => `<option value="">Kein Turm</option>${towers.filter(t => t.status !== 'abgeschlossen' || t.id === sel).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.park + ' · ' + t.name)}</option>`).join('')}`;
+    const running = self ? open[0] : null;
+    const cols = printMode ? 6 : 7;
+    const desc = e => ABSENT(e.kind) ? `<span class="pill k-${e.kind}">${KINDS[e.kind]}</span> ${dec(+e.hours || dailySoll(person) / 60)} h` :
+      `${e.kind === 'schulung' ? '<span class="pill k-schulung">Schulung</span> ' : ''}${esc(e.tower_id ? tName(e.tower_id) : e.location)}${e.overnight ? ' <span class="pill">Nächtigung</span>' : ''}`;
+
+    const rowsHtml = days.map((d, i) => {
+      const st = stats[d], next = days[i + 1], hol = holidayName(d);
+      const weekEnd = !next || kw(next) !== kw(d);
+      const lines = st.list.length ? st.list.map((e, j) => `<tr class="${st.warn.length ? 'haswarn' : ''}">
+          ${j === 0 ? `<td class="nowrap" rowspan="${st.list.length}"><b>${d.slice(8)}.${d.slice(5, 7)}.</b> <span class="muted">${wd(d)}</span>${hol ? `<br><span class="muted small">${esc(hol)}</span>` : ''}</td>` : ''}
+          <td class="mono nowrap">${ABSENT(e.kind) ? 'ganztags' : esc(e.start_time) + '–' + esc(e.end_time || 'läuft')}</td>
+          <td class="r num">${ABSENT(e.kind) ? '' : e.pause_min || 0}</td><td class="r num">${e.travel_min ? hm(e.travel_min) : ''}</td>
+          <td class="r num"><b>${hm(istMin(e))}</b></td>
+          <td class="small">${desc(e)}${e.note ? `<br><span class="muted">${esc(e.note)}</span>` : ''}</td>
+          ${printMode ? '' : `<td class="nowrap noprint">${editable ? `<button type="button" class="ghost small" data-edit="${e.id}">Ändern</button> <button type="button" class="ghost small" data-del="${e.id}">Löschen</button>` : ''}</td>`}
+        </tr>`).join('') : `<tr class="holrow"><td class="nowrap"><b>${d.slice(8)}.${d.slice(5, 7)}.</b> <span class="muted">${wd(d)}</span></td><td colspan="${cols - 1}" class="muted small">Feiertag: ${esc(hol)}</td></tr>`;
+      return lines + (st.warn.length ? `<tr class="warnrow"><td colspan="${cols}">⚠ ${st.warn.map(esc).join(' · ')}</td></tr>` : '') +
+        (weekEnd ? `<tr class="weekrow"><td colspan="4">KW ${kw(d)}</td><td class="r num"><b>${hm(weeks[kw(d)])}</b></td><td colspan="${cols - 5}" class="small">${weeks[kw(d)] > 3600 ? '⚠ über 60 h in dieser Woche' : ''}</td></tr>` : '');
+    }).join('');
+
+    app.innerHTML = `<div class="noprint">${header(`<div class="sub">${self ? 'Meine Zeit' : 'Arbeitszeit'}</div><div class="brand sm">${esc(person.name)}</div>`, back)}${self ? topnav('zeit') : ''}</div>
+      <main class="wrap timeview">
+        ${self && !printMode ? `<section class="card clock">
+          ${running ? `<div><div class="eyebrow">${running.pause_started ? 'Pause seit ' + esc(running.pause_started) : 'Arbeit läuft'}</div>
+              <div class="clockbig">${esc(running.start_time)} <span class="muted">seit</span></div>
+              <div class="muted small">${running.work_date !== today() ? '⚠ Gestartet am ' + fmtDay(running.work_date) + '. Bitte Endzeit nachtragen.' : 'Bisher ' + hm(workMin(running)) + ' h'}${running.tower_id ? ' · ' + esc(tName(running.tower_id)) : ''}</div></div>
+            <div class="clockbtns">
+              ${running.work_date === today() ? (running.pause_started ? `<button type="button" class="primary" id="c-pause-end">Pause beenden</button>` : `<button type="button" class="ghost" id="c-pause">Pause starten</button>`) : ''}
+              ${running.work_date === today() ? `<button type="button" class="primary dark" id="c-stop">Arbeit beenden</button>` : `<button type="button" class="ghost" data-edit="${running.id}">Endzeit nachtragen</button>`}
+            </div>`
+          : `<div><div class="eyebrow">Stempeluhr</div><div class="clockbig">${nowHM()}</div>
+              <label class="fld small">Turm (optional)<select id="c-tower">${towerOpts('')}</select></label></div>
+            <div class="clockbtns"><button type="button" class="primary" id="c-start">Arbeit starten</button></div>`}
+        </section>` : ''}
+
+        ${suggestions.length && !printMode ? `<section class="card sec note">
+          <h2>Vom Turm übernehmen</h2>
+          <p class="muted small">Du warst hier als dabei eingetragen. Prüfen, Fahrzeit ergänzen, speichern.</p>
+          <ul class="entries">${suggestions.map((w, i) => `<li><div class="row between"><span><b>${fmtDay(w.work_date)}</b> · ${esc(tName(w.tower_id))}</span><span class="mono">${esc(w.start_time)}–${esc(w.end_time)}</span></div>
+            <div class="row between"><span class="muted small">Pause ${w.pause_min} min · eingetragen von ${esc(w.created_by_name)}</span><button type="button" class="ghost small" data-sug="${i}">Übernehmen</button></div></li>`).join('')}</ul>
+        </section>` : ''}
+
+        <div class="card daybar noprint">
+          <a class="ghost small" href="#/zeit/${pid}/${shiftMonth(month, -1)}" aria-label="Vormonat">‹</a>
+          <b class="monthname">${esc(monthLabel(month))}</b>
+          <a class="ghost small" href="#/zeit/${pid}/${shiftMonth(month, 1)}" aria-label="Nächster Monat">›</a>
+        </div>
+
+        <div class="rephead printonly"><div><div class="eyebrow">Deliri GmbH · Arbeitszeitaufzeichnung</div><h1>${esc(person.name)}</h1><p class="muted">${esc(monthLabel(month))} · ${dec(+person.weekly_hours || 40)} Stunden/Woche, Gleitzeit</p></div></div>
+
+        ${acc.active ? `<div class="kpis five">
+          <div class="kpi"><span>Soll</span><b>${hm(acc.soll)}</b></div>
+          <div class="kpi"><span>Ist</span><b>${hm(acc.ist)}</b></div>
+          <div class="kpi ${acc.diff < 0 ? 'neg' : 'pos'}"><span>Monat +/−</span><b>${hmSigned(acc.diff)}</b></div>
+          <div class="kpi ${acc.saldoNew < 0 ? 'neg' : 'pos'}"><span>Gleitzeitsaldo</span><b>${hmSigned(acc.saldoNew)}</b><small>Übertrag ${hmSigned(acc.saldoPrev)}</small></div>
+          <div class="kpi"><span>Resturlaub</span><b>${dec(acc.vacLeft, 1)}</b><small>Tage</small></div>
+        </div>
+        <p class="muted small kpiline">Arbeit ${hm(acc.work)} · Fahrzeit ${hm(acc.travel)} · Schulung ${hm(acc.schulung)} · Urlaub ${dec(acc.vacUsed, 1)} T · Krankenstand ${dec(acc.sick, 1)} T · ZA ${dec(acc.za, 1)} T · Nächtigungen ${acc.nights}</p>`
+        : `<p class="muted small">Konten (Gleitzeit, Urlaub) werden ab ${fmtDay(acc.start)} gerechnet.</p>`}
+        ${warnCount ? `<p class="warn small"><b>${warnCount} Hinweis${warnCount > 1 ? 'e' : ''} zu Pausen, Ruhezeit oder Höchstarbeitszeit.</b> Siehe markierte Tage.</p>` : ''}
+
+        ${editable && !printMode ? `<form class="card sec" id="f-time" data-kind="arbeit">
+          <h2 id="t-title">Zeit nachtragen</h2>
+          <input type="hidden" id="t-id">
+          <div class="kindpick" role="group" aria-label="Art">${Object.entries(KINDS).map(([k, l]) => `<label class="crewchip"><input type="radio" name="t-kind" value="${k}" ${k === 'arbeit' ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+          <div class="two">
+            <label class="fld">Datum<input type="date" id="t-date" value="${month === today().slice(0, 7) ? today() : from}" required></label>
+            <label class="fld only-abs">Bis (mehrere Tage)<input type="date" id="t-dateto"></label>
+            <label class="fld only-work">Turm<select id="t-tower">${towerOpts('')}</select></label>
+          </div>
+          <div class="three only-work">
+            <label class="fld">Von<input type="time" id="t-start" value="07:00"></label>
+            <label class="fld">Bis<input type="time" id="t-end" value="17:00"></label>
+            <label class="fld">Pause (min)<input type="number" id="t-pause" value="30" min="0" step="5" inputmode="numeric"></label>
+          </div>
+          <div class="two only-work">
+            <label class="fld">Fahrzeit (min)<input type="number" id="t-travel" value="0" min="0" step="5" inputmode="numeric"></label>
+            <label class="fld">Ort (wenn kein Turm)<input id="t-loc" placeholder="z.B. Büro, Lager, Schulung"></label>
+          </div>
+          <label class="confirm only-work"><input type="checkbox" id="t-night"> Nächtigung auswärts</label>
+          <label class="fld only-abs">Stunden pro Tag<input type="number" id="t-hours" value="${dailySoll(person) / 60}" min="0" max="12" step="0.5" inputmode="decimal"><span class="muted small">Ganzer Tag ${dec(dailySoll(person) / 60)} h, halber Tag ${dec(dailySoll(person) / 120)} h. Wochenenden und Feiertage werden übersprungen.</span></label>
+          <label class="fld">Notiz<input id="t-note" placeholder="optional"></label>
+          <div class="row wrapgap"><button class="primary" type="submit" id="t-save">Speichern</button><button class="ghost" type="button" id="t-cancel" hidden>Abbrechen</button></div>
+        </form>` : ''}
+        ${locked && !printMode ? '<p class="okmsg small">Dieser Monat ist bestätigt. Änderungen nur noch über Ali.</p>' : ''}
+
+        <section class="card sec">
+          <h2>${esc(monthLabel(month))}</h2>
+          ${days.length ? `<div class="tblwrap"><table class="rep timetbl"><thead><tr><th>Tag</th><th>Zeit</th><th class="r">Pause</th><th class="r">Fahrt</th><th class="r">Std.</th><th>Ort / Art</th>${printMode ? '' : '<th class="noprint"></th>'}</tr></thead><tbody>${rowsHtml}</tbody>
+            <tfoot><tr><td colspan="4"><b>Ist ${esc(monthLabel(month))}</b></td><td class="r num"><b>${hm(acc.ist)}</b></td><td colspan="${cols - 5}" class="small">Soll ${hm(acc.soll)} · ${hmSigned(acc.diff)}</td></tr></tfoot></table></div>`
+          : '<p class="muted">In diesem Monat noch keine Einträge.</p>'}
+        </section>
+
+        <section class="card sec">
+          <h2>Monat bestätigen</h2>
+          ${sign ? `<div class="signed"><b>✓ Bestätigt von ${esc(sign.name)}</b> <span class="muted small">${fmt(sign.signed_at)} · Ist ${hm(sign.total_min)} h</span></div>
+              ${changedAfter ? '<p class="warn small">Nach der Bestätigung wurden Einträge geändert.</p>' : ''}
+              ${u.isAdmin && !printMode ? `<button type="button" class="ghost small noprint" id="m-unsign">Bestätigung aufheben</button>` : ''}`
+            : `<p class="muted small">Mit der Bestätigung erklärt ${self ? 'du' : esc(person.name)}, dass die Zeiten stimmen. Danach ${self ? 'kannst du' : 'kann der Mitarbeiter'} den Monat nicht mehr ändern.</p>
+              ${!printMode ? `<button type="button" class="primary noprint" id="m-sign" ${open.length ? 'disabled' : ''}>Monat ${esc(monthLabel(month))} bestätigen</button>${open.length ? '<p class="muted small">Zuerst laufende Zeit beenden.</p>' : ''}` : ''}`}
+          <div class="signs printonly"><div><span></span>Mitarbeiter, Unterschrift</div><div><span></span>Deliri GmbH, Unterschrift</div></div>
+        </section>
+
+        ${!printMode ? `<div class="row wrapgap noprint">
+          <button type="button" class="ghost" id="x-print">Drucken / PDF</button>
+          <button type="button" class="ghost" id="x-csv">Excel (CSV) herunterladen</button>
+        </div>` : ''}
+        ${u.isAdmin && !printMode ? `<details class="card sec noprint" id="logbox"><summary><b>Änderungsverlauf</b> <span class="muted small">jede Änderung mit Zeitpunkt und Person</span></summary><div id="logbody" class="small muted">Lade …</div></details>` : ''}
+      </main>`;
+    bindLogout();
+    if (printMode) { setTimeout(() => window.print(), 400); return; }
+
+    const $ = id => document.getElementById(id);
+    const reload = () => viewTime(pid, month);
+    const base = { profile_id: pid };
+
+    // Stempeluhr
+    if ($('c-start')) $('c-start').onclick = () => safe(async () => { await S.saveTime({ ...base, kind: 'arbeit', work_date: today(), start_time: nowHM(), tower_id: $('c-tower').value || null }); toast('Arbeit gestartet ' + nowHM()); reload(); });
+    if ($('c-pause')) $('c-pause').onclick = () => safe(async () => { await S.saveTime({ id: running.id, pause_started: nowHM() }); reload(); });
+    if ($('c-pause-end')) $('c-pause-end').onclick = () => safe(async () => {
+      let q = toMin(nowHM()) - toMin(running.pause_started); if (q < 0) q += 1440;
+      await S.saveTime({ id: running.id, pause_started: null, pause_min: (+running.pause_min || 0) + q }); reload();
+    });
+    if ($('c-stop')) $('c-stop').onclick = () => safe(async () => {
+      const patch = { id: running.id, end_time: nowHM() };
+      if (running.pause_started) { let q = toMin(nowHM()) - toMin(running.pause_started); if (q < 0) q += 1440; patch.pause_min = (+running.pause_min || 0) + q; patch.pause_started = null; }
+      await S.saveTime(patch); toast('Arbeit beendet ' + nowHM()); reload();
+    });
+
+    // Formular
+    const f = $('f-time');
+    const kindNow = () => document.querySelector('input[name=t-kind]:checked')?.value || 'arbeit';
+    const setKind = k => { if (!f) return; f.dataset.kind = ABSENT(k) ? 'abs' : 'arbeit'; const r = document.querySelector(`input[name=t-kind][value=${k}]`); if (r) r.checked = true; };
+    document.querySelectorAll('input[name=t-kind]').forEach(r => r.onchange = () => setKind(r.value));
+    const fill = e => {
+      if (!f) return;
+      setKind(e.kind || 'arbeit');
+      $('t-id').value = e.id || ''; $('t-date').value = e.work_date; $('t-dateto').value = ''; $('t-dateto').disabled = !!e.id;
+      $('t-start').value = e.start_time || ''; $('t-end').value = e.end_time || '';
+      $('t-pause').value = e.pause_min ?? 0; $('t-travel').value = e.travel_min ?? 0; $('t-tower').innerHTML = towerOpts(e.tower_id || '');
+      $('t-loc').value = e.location || ''; $('t-night').checked = !!e.overnight; $('t-note').value = e.note || '';
+      $('t-hours').value = e.hours ?? dailySoll(person) / 60;
+      $('t-title').textContent = e.id ? 'Eintrag ändern' : 'Zeit nachtragen'; $('t-cancel').hidden = !e.id;
+      f.classList.add('editing'); f.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    if (f) {
+      f.addEventListener('focusin', () => f.classList.add('editing'));
+      f.onsubmit = e => {
+        e.preventDefault();
+        safe(async () => {
+          const k = kindNow(), id = $('t-id').value, date = $('t-date').value;
+          if (ABSENT(k)) {
+            const hours = +$('t-hours').value || dailySoll(person) / 60, upto = !id && $('t-dateto').value ? $('t-dateto').value : date;
+            if (upto < date) { toast('„Bis“ liegt vor dem Startdatum.', true); return; }
+            const dates = []; for (let d = date; d <= upto; d = shiftDay(d, 1)) if (isWorkday(d) || date === upto) dates.push(d);
+            if (!dates.length) { toast('Im gewählten Zeitraum ist kein Arbeitstag.', true); return; }
+            for (const d of dates) await S.saveTime({ ...(id ? { id } : base), kind: k, work_date: d, hours, start_time: null, end_time: null, pause_min: 0, travel_min: 0, tower_id: null, location: '', overnight: false, note: $('t-note').value.trim() });
+            toast(KINDS[k] + (dates.length > 1 ? ` für ${dates.length} Arbeitstage` : '') + ' gespeichert'); reload(); return;
+          }
+          const row = { ...base, kind: k, hours: null, work_date: date, start_time: $('t-start').value, end_time: $('t-end').value || null, pause_min: +$('t-pause').value || 0,
+            travel_min: +$('t-travel').value || 0, tower_id: $('t-tower').value || null, location: $('t-loc').value.trim(), overnight: $('t-night').checked, note: $('t-note').value.trim() };
+          if (id) row.id = id;
+          if (!row.start_time) { toast('Bitte eine Beginnzeit eintragen.', true); return; }
+          if (!row.end_time && row.work_date !== today()) { toast('Bitte eine Endzeit eintragen.', true); return; }
+          await S.saveTime(row); toast('Gespeichert'); reload();
+        });
+      };
+      $('t-cancel').onclick = () => reload();
+    }
+    document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => fill(entries.find(e => e.id === b.dataset.edit) || open.find(e => e.id === b.dataset.edit)));
+    document.querySelectorAll('[data-del]').forEach(b => twoTap(b, 'Löschen', () => safe(async () => { await S.deleteTime(b.dataset.del); reload(); })));
+    document.querySelectorAll('[data-sug]').forEach(b => b.onclick = () => { const w = suggestions[+b.dataset.sug]; fill({ kind: 'arbeit', work_date: w.work_date, start_time: w.start_time, end_time: w.end_time, pause_min: w.pause_min, tower_id: w.tower_id, travel_min: 0 }); });
+
+    // Bestätigen
+    if ($('m-sign')) twoTap($('m-sign'), $('m-sign').textContent, () => safe(async () => { await S.signMonth({ profile_id: pid, month, total_min: Math.round(acc.ist), name: u.name }); toast('Monat bestätigt'); reload(); }));
+    if ($('m-unsign')) twoTap($('m-unsign'), 'Bestätigung aufheben', () => safe(async () => { await S.unsignMonth(sign.id); reload(); }));
+
+    // Export
+    $('x-print').onclick = () => { location.hash = '#/zeit/' + pid + '/' + month + '/druck'; };
+    $('x-csv').onclick = () => {
+      const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', h2 = m => (m / 60).toFixed(2).replace('.', ',');
+      const lines = [['Mitarbeiter', 'Datum', 'Wochentag', 'Art', 'Beginn', 'Ende', 'Pause (min)', 'Fahrzeit (min)', 'Stunden', 'Turm / Ort', 'Nächtigung', 'Notiz', 'Hinweise'].map(q).join(';')];
+      days.forEach(d => stats[d].list.forEach(e => lines.push([person.name, d.split('-').reverse().join('.'), wd(d), KINDS[e.kind || 'arbeit'], e.start_time || '', e.end_time || '', ABSENT(e.kind) ? '' : e.pause_min || 0, e.travel_min || 0,
+        h2(istMin(e)), e.tower_id ? tName(e.tower_id) : e.location, e.overnight ? 'ja' : '', e.note, stats[d].warn.join(', ')].map(q).join(';'))));
+      lines.push('');
+      [['Soll', h2(acc.soll)], ['Ist', h2(acc.ist)], ['Monat +/-', h2(acc.diff)], ['Übertrag Vormonat', h2(acc.saldoPrev)], ['Gleitzeitsaldo neu', h2(acc.saldoNew)],
+       ['Urlaub genommen (Tage)', dec(acc.vacUsed, 2)], ['Resturlaub (Tage)', dec(acc.vacLeft, 2)], ['Krankenstand (Tage)', dec(acc.sick, 2)], ['Zeitausgleich (Tage)', dec(acc.za, 2)],
+       ['Schulung (h)', h2(acc.schulung)], ['Fahrzeit (h)', h2(acc.travel)], ['Nächtigungen', acc.nights]].forEach(([a, b]) => lines.push([q(a), q(b)].join(';')));
+      download(`Arbeitszeit_${person.name.replace(/\s+/g, '_')}_${month}.csv`, lines.join('\r\n'));
+    };
+
+    // Verlauf (Admin)
+    const lb = $('logbox');
+    if (lb) lb.addEventListener('toggle', () => { if (!lb.open) return; safe(async () => {
+      const log = await S.listTimeLog({ profileId: pid, from, to });
+      const label = { insert: 'angelegt', update: 'geändert', delete: 'gelöscht' };
+      const d1 = r => !r ? '' : ABSENT(r.kind) ? `${fmtDay(r.work_date)} ${KINDS[r.kind]} ${r.hours} h` : `${fmtDay(r.work_date)} ${r.start_time}–${r.end_time || '…'}, Pause ${r.pause_min}, Fahrt ${r.travel_min || 0}`;
+      $('logbody').innerHTML = log.length ? `<ul class="loglist">${log.map(l => `<li><b>${fmt(l.changed_at)}</b> ${esc(l.changed_by_name || '?')} hat ${label[l.action] || l.action}: ${esc(l.action === 'insert' ? d1(l.new_row) : l.action === 'delete' ? d1(l.old_row) : d1(l.old_row) + ' → ' + d1(l.new_row))}</li>`).join('')}</ul>` : 'Keine Änderungen.';
+    }); });
+  }
+  function download(name, text) {
+    const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ---------- Team (nur Admin) ----------
+  async function viewTeam(month, printMode) {
+    const u = S.user();
+    if (!u.isAdmin) { location.hash = '#/'; return; }
+    month = month || today().slice(0, 7);
+    const to = month + '-' + String(daysIn(month)).padStart(2, '0');
+    const profiles = await S.listProfiles();
+    const minStart = profiles.reduce((m, p) => startOf(p) < m ? startOf(p) : m, month + '-01');
+    const [entries, signs] = await Promise.all([S.listTime({ from: shiftDay(minStart, -1), to }), S.listMonthSignoffs({ month })]);
+    const rows = profiles.filter(p => p.active).map(p => {
+      const mine = entries.filter(e => e.profile_id === p.id);
+      const st = dayStats(mine.filter(e => e.work_date >= month + '-01'), []);
+      return { p, acc: accounts(p, mine, month), warn: Object.values(st).reduce((s, d) => s + d.warn.length, 0), sign: signs.find(x => x.profile_id === p.id) };
+    });
+    const csv = () => {
+      const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', h2 = m => (m / 60).toFixed(2).replace('.', ',');
+      const head = ['Mitarbeiter', 'Art', 'Wochenstunden', 'Soll (h)', 'Ist (h)', 'Monat +/- (h)', 'Übertrag Vormonat (h)', 'Gleitzeitsaldo neu (h)', 'Urlaub genommen (Tage)', 'Resturlaub (Tage)', 'Krankenstand (Tage)', 'Zeitausgleich (Tage)', 'Schulung (h)', 'Fahrzeit (h)', 'Nächtigungen', 'Monat bestätigt', 'Hinweise AZG'];
+      return [head.map(q).join(';'), ...rows.map(({ p, acc, warn, sign }) => [p.name, p.kind === 'sub' ? 'Subunternehmer' : 'Angestellt', dec(+p.weekly_hours || 40), h2(acc.soll), h2(acc.ist), h2(acc.diff), h2(acc.saldoPrev), h2(acc.saldoNew),
+        dec(acc.vacUsed, 2), dec(acc.vacLeft, 2), dec(acc.sick, 2), dec(acc.za, 2), h2(acc.schulung), h2(acc.travel), acc.nights, sign ? 'ja, ' + fmtDay(sign.signed_at) : 'nein', warn].map(q).join(';'))].join('\r\n');
+    };
+    const table = `<div class="tblwrap"><table class="rep teamtbl"><thead><tr><th>Name</th><th class="r">Soll</th><th class="r">Ist</th><th class="r">+/− Monat</th><th class="r">Übertrag</th><th class="r">Saldo neu</th><th class="r">Urlaub</th><th class="r">Rest&shy;urlaub</th><th class="r">Krank</th><th class="r">ZA</th><th class="r">Fahrt</th><th class="r">Nächt.</th><th>Status</th>${printMode ? '' : '<th class="noprint"></th>'}</tr></thead><tbody>
+      ${rows.map(({ p, acc, warn, sign }) => `<tr><td class="nowrap"><b>${esc(p.name)}</b>${p.kind === 'sub' ? ' <span class="pill">Sub</span>' : ''}</td>
+        <td class="r num">${hm(acc.soll)}</td><td class="r num">${hm(acc.ist)}</td><td class="r num ${acc.diff < 0 ? 'negt' : ''}">${hmSigned(acc.diff)}</td><td class="r num">${hmSigned(acc.saldoPrev)}</td><td class="r num ${acc.saldoNew < 0 ? 'negt' : ''}"><b>${hmSigned(acc.saldoNew)}</b></td>
+        <td class="r num">${dec(acc.vacUsed, 1)}</td><td class="r num"><b>${dec(acc.vacLeft, 1)}</b></td><td class="r num">${dec(acc.sick, 1)}</td><td class="r num">${dec(acc.za, 1)}</td><td class="r num">${hm(acc.travel)}</td><td class="r num">${acc.nights}</td>
+        <td class="nowrap">${sign ? '<span class="pill ok">bestätigt</span>' : '<span class="pill">offen</span>'}${warn ? ` <span class="pill bad">${warn} ⚠</span>` : ''}</td>
+        ${printMode ? '' : `<td class="noprint"><a class="ghost small" href="#/zeit/${p.id}/${month}">Öffnen</a></td>`}</tr>`).join('')}
+      </tbody></table></div>`;
+
+    if (printMode) {
+      app.innerHTML = `<main class="wrap report"><div class="rephead"><div><div class="eyebrow">Deliri GmbH · Monatsübersicht Arbeitszeit</div><h1>${esc(monthLabel(month))}</h1><p class="muted">Gleitzeit, Saldo und Urlaub in Stunden (h:mm) bzw. Tagen. Erstellt ${fmt(new Date().toISOString())}</p></div></div>${table}
+        <p class="muted small">Saldo = Ist minus Soll (Soll ohne gesetzliche Feiertage). Ist enthält Arbeitszeit, Fahrzeit und Schulung; Urlaub und Krankenstand werden mit den eingetragenen Stunden gutgeschrieben, Zeitausgleich reduziert den Saldo.</p>
+        <div class="signs"><div><span></span>Deliri GmbH, Unterschrift</div><div><span></span>Datum</div></div></main>`;
+      setTimeout(() => window.print(), 400); return;
+    }
+
+    app.innerHTML = header('<div class="brand">DELIRI</div><div class="sub">Team</div>') + topnav('team') + `
+      <main class="wrap">
+        <div class="card daybar"><a class="ghost small" href="#/team/${shiftMonth(month, -1)}" aria-label="Vormonat">‹</a><b class="monthname">${esc(monthLabel(month))}</b><a class="ghost small" href="#/team/${shiftMonth(month, 1)}" aria-label="Nächster Monat">›</a></div>
+        <section class="card sec"><div class="row between wrapgap"><h2>Monatsübersicht für den Steuerberater</h2>
+          <div class="row"><button type="button" class="ghost small" id="tm-print">Drucken / PDF</button><button type="button" class="ghost small" id="tm-csv">Excel (CSV)</button></div></div>
+          ${rows.length ? table : '<p class="muted">Noch keine aktiven Mitarbeiter.</p>'}
+          <p class="muted small">Ob und wie viele Überstunden aus dem Gleitzeitsaldo entstehen, regelt eure Gleitzeitvereinbarung bzw. der Kollektivvertrag.</p>
+        </section>
+
+        <form class="card sec" id="f-prof">
+          <h2 id="p-title">Mitarbeiter anlegen</h2>
+          <input type="hidden" id="p-id">
+          <div class="two">
+            <label class="fld">Vor- und Nachname<input id="p-name" required></label>
+            <label class="fld">E-Mail (für den Login)<input id="p-email" type="email" placeholder="optional, z.B. bei Subunternehmern"></label>
+          </div>
+          <div class="two">
+            <label class="fld">Art<select id="p-kind"><option value="angestellt">Angestellt</option><option value="sub">Subunternehmer</option></select></label>
+            <label class="fld">Rolle<select id="p-role"><option value="mitarbeiter">Mitarbeiter</option><option value="admin">Admin (sieht alle Zeiten)</option></select></label>
+          </div>
+          <div class="two">
+            <label class="fld">Wochenstunden<input type="number" id="p-week" value="40" min="0" max="60" step="0.5" inputmode="decimal"></label>
+            <label class="fld">Urlaubsanspruch pro Jahr (Arbeitstage)<input type="number" id="p-vac" value="25" min="0" step="0.5" inputmode="decimal"></label>
+          </div>
+          <fieldset class="crew startvals"><legend>Startwerte beim Umstieg (Stand aus ARTimer)</legend>
+            <div class="three">
+              <label class="fld">Stichtag<input type="date" id="p-bdate"></label>
+              <label class="fld">Resturlaub (Tage)<input type="number" id="p-vstart" value="0" step="0.5" inputmode="decimal"></label>
+              <label class="fld">Gleitzeitsaldo (Stunden)<input type="number" id="p-sstart" value="0" step="0.25" inputmode="decimal" placeholder="z.B. 12,5 oder -3"></label>
+            </div>
+            <span class="muted small">Ab dem Stichtag rechnet die App Saldo und Urlaub selbst weiter. Der Jahresanspruch wird jeweils am 1. Jänner dazugezählt.</span>
+          </fieldset>
+          <label class="confirm"><input type="checkbox" id="p-active" checked> Aktiv</label>
+          <p class="muted small">Login: In Supabase einen Benutzer mit genau dieser E-Mail anlegen. Beim ersten Anmelden wird er automatisch mit diesem Mitarbeiter verknüpft.</p>
+          <div class="row wrapgap"><button class="primary" type="submit">Speichern</button><button class="ghost" type="button" id="p-cancel" hidden>Abbrechen</button></div>
+        </form>
+
+        <section class="card sec"><h2>Alle Mitarbeiter</h2>
+          <ul class="entries">${profiles.map(p => `<li class="${p.active ? '' : 'inactive'}"><div class="row between"><b>${esc(p.name)}</b><span>${p.role === 'admin' ? '<span class="pill ok">Admin</span> ' : ''}${p.kind === 'sub' ? '<span class="pill">Sub</span> ' : ''}${p.active ? '' : '<span class="pill">inaktiv</span>'}</span></div>
+            <div class="row between"><span class="muted small">${esc(p.email || 'ohne E-Mail')} · ${p.user_id ? 'Login verknüpft' : 'noch kein Login'} · ${dec(+p.weekly_hours || 40)} h/Woche · Stichtag ${p.balance_date ? fmtDay(p.balance_date) : 'nicht gesetzt'}</span><button type="button" class="ghost small" data-p="${p.id}">Bearbeiten</button></div></li>`).join('')}</ul>
+        </section>
+      </main>`;
+    bindLogout();
+    const $ = id => document.getElementById(id);
+    $('tm-print').onclick = () => { location.hash = '#/team/' + month + '/druck'; };
+    $('tm-csv').onclick = () => download(`Monatsuebersicht_Arbeitszeit_${month}.csv`, csv());
+    document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+      const p = profiles.find(x => x.id === b.dataset.p);
+      $('p-id').value = p.id; $('p-name').value = p.name; $('p-email').value = p.email || ''; $('p-kind').value = p.kind; $('p-role').value = p.role; $('p-active').checked = p.active;
+      $('p-week').value = p.weekly_hours ?? 40; $('p-vac').value = p.vacation_per_year ?? 25; $('p-bdate').value = p.balance_date || ''; $('p-vstart').value = p.vacation_start ?? 0; $('p-sstart').value = (p.saldo_start_min || 0) / 60;
+      $('p-title').textContent = 'Mitarbeiter bearbeiten'; $('p-cancel').hidden = false; $('f-prof').scrollIntoView({ behavior: 'smooth' });
+    });
+    $('p-cancel').onclick = () => viewTeam(month);
+    $('f-prof').onsubmit = e => {
+      e.preventDefault();
+      safe(async () => {
+        if ($('p-id').value === u.profileId && ($('p-role').value !== 'admin' || !$('p-active').checked)) { toast('Du kannst dir selbst die Admin-Rechte nicht entziehen.', true); return; }
+        await S.saveProfile({ id: $('p-id').value || undefined, name: $('p-name').value.trim(), email: $('p-email').value.trim(), kind: $('p-kind').value, role: $('p-role').value, active: $('p-active').checked,
+          weekly_hours: +$('p-week').value || 40, vacation_per_year: +$('p-vac').value || 0, balance_date: $('p-bdate').value || null, vacation_start: +$('p-vstart').value || 0,
+          saldo_start_min: Math.round((parseFloat(String($('p-sstart').value).replace(',', '.')) || 0) * 60) });
+        toast('Gespeichert'); viewTeam(month);
+      });
+    };
+  }
+
   // ---------- Protokoll (druckbar) ----------
   async function viewReport(id) {
     const tower = await S.getTower(id); const tpl = T[tower.tower_type];
@@ -552,6 +1006,8 @@
         if (parts[2] === 'protokoll') await viewReport(parts[1]);
         else await viewTower(parts[1], ['tag', 'wls', 'fin', 'maengel', 'info'].includes(parts[2]) ? parts[2] : 'tag');
       } else if (parts[0] === 'tag' && parts[1] && parts[2]) await viewDayReport(parts[1], decodeURIComponent(parts[2]));
+      else if (parts[0] === 'zeit') await viewTime(parts[1] || null, parts[2] || null, parts[3] === 'druck');
+      else if (parts[0] === 'team') await viewTeam(parts[1] || null, parts[2] === 'druck');
       else await viewHome();
     } catch (e) { console.error(e); app.innerHTML = header('<div class="sub">Fehler</div>', '#/') + `<main class="wrap"><div class="card"><p><b>Daten konnten nicht geladen werden.</b></p><p class="muted">${esc(e.message || e)}</p><p>Internetverbindung prüfen und Seite neu laden.</p></div></main>`; }
     window.scrollTo(0, 0);
