@@ -76,7 +76,7 @@
 
   // ---------- Login ----------
   function viewLogin() {
-    app.innerHTML = `${header('<div class="brand">DELIRI</div><div class="sub">Industrieklettern · Crew</div>')}
+    app.innerHTML = `${header('<div class="brand">DELIRI</div><div class="sub">Industrieklettern</div>')}
     <main class="wrap narrow">
       <form class="card" id="f-login">
         <img class="biglogo" src="img/logo-240.png" alt="Deliri" width="96" height="100">
@@ -100,7 +100,7 @@
     };
   }
   function viewName() {
-    app.innerHTML = `${header('<div class="brand">DELIRI</div><div class="sub">Industrieklettern · Crew</div>')}
+    app.innerHTML = `${header('<div class="brand">DELIRI</div><div class="sub">Industrieklettern</div>')}
     <main class="wrap narrow"><form class="card" id="f-name">
       <h1>Wie heißt du?</h1>
       <p class="muted">Dein Name steht bei jedem Häkchen und jeder Unterschrift.</p>
@@ -112,7 +112,7 @@
 
   // ---------- Start ----------
   async function viewHome() {
-    app.innerHTML = header('<div class="brand">DELIRI</div><div class="sub">Industrieklettern · Crew</div>') + topnav('tuerme') + `<main class="wrap"><p class="muted">Lade …</p></main>`;
+    app.innerHTML = header('<div class="brand">DELIRI</div><div class="sub">Industrieklettern</div>') + topnav('tuerme') + `<main class="wrap"><p class="muted">Lade …</p></main>`;
     bindLogout();
     const [towers, checks, defects] = await Promise.all([S.listTowers(), S.allChecks(), S.listDefects({ status: 'offen' })]);
     const list = towers.filter(t => homeFilter === 'alle' || t.status === homeFilter);
