@@ -1323,6 +1323,16 @@
     window.scrollTo(0, 0);
   }
 
+  // Neue Version automatisch laden (GitHub Pages speichert Dateien bis zu 10 Minuten zwischen)
+  async function checkUpdate() {
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); const j = await r.json();
+      if (j.v && window.APP_VERSION && j.v !== window.APP_VERSION && !document.querySelector('form.editing')) location.replace(location.pathname + '?v=' + j.v + location.hash);
+    } catch (e) {}
+  }
+  checkUpdate();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
+
   window.addEventListener('hashchange', render);
   S.init(render).then(render);
 })();
