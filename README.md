@@ -1,4 +1,4 @@
-# Deliri Turm-App
+# Deliri Crew
 
 Tagesberichte und Checklisten für den Leiterbau im Betonturm (WLS Montage inkl. Bodenarbeiten und Finishing). Dazu kommen Mängel mit Foto, Unterschrift je Phase und ein Archiv aller Türme. Die App läuft im Browser am Handy und kann auf den Homescreen gelegt werden.
 
