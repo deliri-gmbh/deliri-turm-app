@@ -56,7 +56,7 @@
         if (f.profileId) q = q.eq('profile_id', f.profileId);
         return ok(await q);
       },
-      async openTime(profileId) { return ok(await sb.from('time_entries').select('*').eq('profile_id', profileId).eq('kind', 'arbeit').is('end_time', null).not('start_time', 'is', null).order('work_date')); },
+      async openTime(profileId) { return ok(await sb.from('time_entries').select('*').eq('profile_id', profileId).eq('kind', 'arbeit').or('end_time.is.null,travel_started.not.is.null').order('work_date')); },
       async saveTime(e) {
         const { id, ...row } = e;
         if (id) return ok(await sb.from('time_entries').update(row).eq('id', id).select().single());
@@ -181,7 +181,7 @@
         const { id, ...rest } = p; const x = { id: uid(), user_id: null, created_at: now(), ...rest }; db.profiles.push(x); save(); return x;
       },
       async listTime(f) { return db.time.filter(t => t.work_date >= f.from && t.work_date <= f.to && (!f.profileId || t.profile_id === f.profileId)).sort((a, b) => (a.work_date + a.start_time).localeCompare(b.work_date + b.start_time)); },
-      async openTime(pid) { return db.time.filter(t => t.profile_id === pid && !t.end_time && t.start_time && (t.kind || 'arbeit') === 'arbeit'); },
+      async openTime(pid) { return db.time.filter(t => t.profile_id === pid && (t.kind || 'arbeit') === 'arbeit' && (!t.end_time || t.travel_started)); },
       async saveTime(e) {
         if (e.id) { const x = db.time.find(t => t.id === e.id); const o = { ...x }; Object.assign(x, e, { updated_at: now() }); logT('update', o, { ...x }); save(); return x; }
         const x = { kind: 'arbeit', pause_min: 0, travel_min: 0, overnight: false, note: '', location: '', ...e, id: uid(), created_at: now(), updated_at: now() }; db.time.push(x); logT('insert', null, { ...x }); save(); return x;

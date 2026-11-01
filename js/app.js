@@ -40,6 +40,7 @@
     try { return await fn(); }
     catch (e) { console.error(e); toast('Fehler: ' + (e.message || e) + '. Internetverbindung prüfen und nochmal versuchen.', true); }
   }
+  const isTurm = t => !!(t && T[t.tower_type]);
   function progressOf(tower, checks) {
     const tpl = T[tower.tower_type]; if (!tpl) return { wls: 0, fin: 0 };
     const r = {};
@@ -67,7 +68,7 @@
     ${S.mode === 'demo' ? `<div class="demo wrap">Demo-Modus: Daten bleiben nur auf diesem Gerät. Für das Team Supabase einrichten (siehe Anleitung).</div>` : ''}`;
   }
   function topnav(active) {
-    const items = [['tuerme', '#/', 'Türme'], ['zeit', '#/zeit', 'Meine Zeit']];
+    const items = [['tuerme', '#/', 'Baustellen'], ['zeit', '#/zeit', 'Meine Zeit']];
     if (S.user()?.isAdmin) items.push(['team', '#/team', 'Team']);
     return `<nav class="tabs wrap mainnav">${items.map(([k, href, l]) => `<a href="${href}" aria-selected="${k === active}">${l}</a>`).join('')}</nav>`;
   }
@@ -120,14 +121,14 @@
 
     app.querySelector('main').innerHTML = `
       <div class="row between">
-        <h1>Türme</h1>
-        <a class="primary" href="#/neu">+ Neuer Turm</a>
+        <h1>Baustellen</h1>
+        <a class="primary" href="#/neu">+ Neue Baustelle</a>
       </div>
       ${defects.length ? `<section class="card warnbox">
         <h2>Offene Mängel <span class="pill bad">${defects.length}</span></h2>
         <ul class="dlist">${defects.slice(0, 6).map(d => `<li><a href="#/t/${d.tower_id}/maengel">
           <b>${esc(d.title)}</b><span>${esc(d.towers ? d.towers.park + ' · ' + d.towers.name : '')}${d.location ? ' · ' + esc(d.location) : ''}${d.needs_part ? ' · Teil: ' + esc(d.needs_part) : ''}</span></a></li>`).join('')}</ul>
-        ${defects.length > 6 ? `<p class="muted small">und ${defects.length - 6} weitere, siehe Turm</p>` : ''}
+        ${defects.length > 6 ? `<p class="muted small">und ${defects.length - 6} weitere, siehe Baustelle</p>` : ''}
       </section>` : ''}
       <div class="chips" role="group" aria-label="Filter">
         ${[['offen', 'In Arbeit'], ['abgeschlossen', 'Archiv'], ['alle', 'Alle']].map(([k, l]) => `<button type="button" class="chip" data-f="${k}" aria-pressed="${homeFilter === k}">${l}</button>`).join('')}
@@ -137,11 +138,12 @@
           <a class="card tower" href="#/t/${t.id}/tag">
             <div class="row between"><b class="tname">${esc(t.name)}</b>
               ${t.status === 'abgeschlossen' ? '<span class="pill ok">Fertig</span>' : od ? `<span class="pill bad">${od} Mangel${od > 1 ? '' : ''}</span>` : '<span class="pill">In Arbeit</span>'}</div>
-            <div class="muted small">${esc(T[t.tower_type]?.name || t.tower_type)} · ${fmtDay(t.created_at)}</div>
+            ${isTurm(t) ? `<div class="muted small">${esc(T[t.tower_type].name)} · ${fmtDay(t.created_at)}</div>
             <div class="prog"><span>WLS</span>${bar(pr.wls)}<span class="num">${pr.wls}%</span></div>
-            <div class="prog"><span>Fin.</span>${bar(pr.fin)}<span class="num">${pr.fin}%</span></div>
+            <div class="prog"><span>Fin.</span>${bar(pr.fin)}<span class="num">${pr.fin}%</span></div>`
+            : `<div class="muted small">Baustelle${t.customer ? ' · ' + esc(t.customer) : ''} · ${fmtDay(t.created_at)}</div>${t.address ? `<div class="small">${esc(t.address)}</div>` : ''}`}
           </a>`; }).join('')}
-      </div></section>`).join('') : `<div class="card empty"><p><b>${homeFilter === 'abgeschlossen' ? 'Noch keine abgeschlossenen Türme.' : 'Noch kein Turm angelegt.'}</b></p><p class="muted">Leg den ersten Turm an, z.B. Windpark Lavamünd, WEA 01.</p></div>`}`;
+      </div></section>`).join('') : `<div class="card empty"><p><b>${homeFilter === 'abgeschlossen' ? 'Noch keine abgeschlossenen Baustellen.' : 'Noch keine Baustelle angelegt.'}</b></p><p class="muted">Leg die erste Baustelle an, z.B. einen Turm im Windpark Lavamünd oder „Fensterreinigung Herr Eder“.</p></div>`}`;
     app.querySelectorAll('.chip').forEach(b => b.onclick = () => { homeFilter = b.dataset.f; viewHome(); });
   }
 
@@ -149,20 +151,37 @@
   async function viewNew() {
     const towers = await S.listTowers();
     const parks = [...new Set(towers.map(t => t.park))];
-    app.innerHTML = header('<div class="sub">Neuer Turm</div>', '#/') + `
-    <main class="wrap narrow"><form class="card" id="f-new">
-      <label class="fld">Windpark<input id="t-park" required list="parks" placeholder="Windpark Lavamünd" value="${esc(parks[0] || '')}">
-        <datalist id="parks">${parks.map(p => `<option value="${esc(p)}">`).join('')}</datalist></label>
-      <label class="fld">Turm / WEA Nummer<input id="t-name" required placeholder="WEA 01"></label>
-      <label class="fld">Turmtyp<select id="t-type">${Object.values(T).map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></label>
+    app.innerHTML = header('<div class="sub">Neue Baustelle</div>', '#/') + `
+    <main class="wrap narrow"><form class="card" id="f-new" data-kind="turm">
+      <div class="kindpick" role="group" aria-label="Art der Baustelle">
+        <label class="crewchip"><input type="radio" name="n-kind" value="turm" checked><span>Windkraft-Turm (mit Checkliste)</span></label>
+        <label class="crewchip"><input type="radio" name="n-kind" value="baustelle"><span>Sonstige Baustelle</span></label>
+      </div>
+      <label class="fld only-turm">Windpark<input id="t-park" list="parks" placeholder="Windpark Lavamünd" value="${esc(parks[0] || '')}"></label>
+      <label class="fld only-turm">Turm / WEA Nummer<input id="t-name" placeholder="WEA 01"></label>
+      <label class="fld only-turm">Turmtyp<select id="t-type">${Object.values(T).map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></label>
+      <label class="fld only-site">Bezeichnung<input id="b-name" placeholder="z.B. Fensterreinigung Herr Eder"></label>
+      <label class="fld only-site">Ort (für Gruppierung und Tagesbericht)<input id="b-park" list="parks" placeholder="z.B. Wien"></label>
+      <datalist id="parks">${parks.map(p => `<option value="${esc(p)}">`).join('')}</datalist>
       <label class="fld">Kunde<input id="t-cust" value="Max Bögl"></label>
-      <button class="primary" type="submit">Turm anlegen</button>
+      <label class="fld placefld">Adresse (für Anreise und Kilometer)<input id="t-addr" autocomplete="off" placeholder="Straße, Ort"><div class="sugg" id="sg-addr" hidden></div></label>
+      <button class="primary" type="submit">Baustelle anlegen</button>
     </form></main>`;
     bindLogout();
-    document.getElementById('f-new').onsubmit = e => {
+    const f = document.getElementById('f-new'), $ = id => document.getElementById(id);
+    placeInput($('t-addr'), $('sg-addr'));
+    document.querySelectorAll('input[name=n-kind]').forEach(r => r.onchange = () => {
+      f.dataset.kind = r.value;
+      if (r.value === 'baustelle' && $('t-cust').value === 'Max Bögl') $('t-cust').value = '';
+      if (r.value === 'turm' && !$('t-cust').value) $('t-cust').value = 'Max Bögl';
+    });
+    f.onsubmit = e => {
       e.preventDefault();
+      const turm = f.dataset.kind === 'turm';
+      const park = (turm ? $('t-park') : $('b-park')).value.trim(), name = (turm ? $('t-name') : $('b-name')).value.trim();
+      if (!park || !name) { toast(turm ? 'Bitte Windpark und Turmnummer eingeben.' : 'Bitte Bezeichnung und Ort eingeben.', true); return; }
       safe(async () => {
-        const t = await S.createTower({ park: document.getElementById('t-park').value.trim(), name: document.getElementById('t-name').value.trim(), tower_type: document.getElementById('t-type').value, customer: document.getElementById('t-cust').value.trim() });
+        const t = await S.createTower({ park, name, tower_type: turm ? $('t-type').value : 'baustelle', customer: $('t-cust').value.trim(), address: $('t-addr').value.trim() });
         location.hash = '#/t/' + t.id + '/tag';
       });
     };
@@ -177,14 +196,15 @@
     const [checks, signoffs, defects] = await Promise.all([S.getChecks(id), S.getSignoffs(id), S.listDefects({ towerId: id })]);
     const pr = progressOf(tower, checks);
     const openDef = defects.filter(d => d.status === 'offen').length;
-    const tabs = [['tag', 'Tag', ''], ['wls', 'WLS', pr.wls + '%'], ['fin', 'Finish', pr.fin + '%'], ['maengel', 'Mängel', openDef ? String(openDef) : ''], ['info', 'Info', '']];
+    const tabs = tpl ? [['tag', 'Tag', ''], ['wls', 'WLS', pr.wls + '%'], ['fin', 'Finish', pr.fin + '%'], ['maengel', 'Mängel', openDef ? String(openDef) : ''], ['info', 'Info', '']]
+      : [['tag', 'Tag', ''], ['maengel', 'Mängel', openDef ? String(openDef) : ''], ['info', 'Info', '']];
+    if (!tpl && (tab === 'wls' || tab === 'fin')) tab = 'tag';
 
     app.innerHTML = header(`<div class="sub">${esc(tower.park)}</div><div class="brand sm">${esc(tower.name)}</div>`, '#/') + `
       <nav class="tabs wrap" role="tablist">${tabs.map(([k, l, b]) => `<a role="tab" href="#/t/${id}/${k}" aria-selected="${tab === k}">${l}${b ? `<span class="badge${k === 'maengel' ? ' bad' : ''}">${b}</span>` : ''}</a>`).join('')}</nav>
       <main class="wrap" id="tv"></main>`;
     bindLogout();
     const main = document.getElementById('tv');
-    if (!tpl) { main.innerHTML = '<p>Unbekannter Turmtyp ' + esc(tower.tower_type) + '.</p>'; return; }
 
     if (tab === 'wls' || tab === 'fin') renderPhase(main, tower, tpl, tab, checks, signoffs);
     else if (tab === 'maengel') renderDefects(main, tower, defects);
@@ -310,8 +330,8 @@
         <label class="fld">Foto<input id="d-photo" type="file" accept="image/*" capture="environment"></label>
         <button class="primary" type="submit">Mangel speichern</button>
       </form>
-      ${others.length ? `<section class="card warnbox"><h2>Offen in anderen Türmen im ${esc(tower.park)}</h2><ul class="dlist">${others.map(d => `<li><a href="#/t/${d.tower_id}/maengel"><b>${esc(d.title)}</b><span>${esc(d.towers?.name || '')}${d.location ? ' · ' + esc(d.location) : ''}${d.needs_part ? ' · Teil: ' + esc(d.needs_part) : ''}</span></a></li>`).join('')}</ul></section>` : ''}
-      <h2 class="h2out">Mängel an diesem Turm</h2>
+      ${others.length ? `<section class="card warnbox"><h2>Offen auf anderen Baustellen in ${esc(tower.park)}</h2><ul class="dlist">${others.map(d => `<li><a href="#/t/${d.tower_id}/maengel"><b>${esc(d.title)}</b><span>${esc(d.towers?.name || '')}${d.location ? ' · ' + esc(d.location) : ''}${d.needs_part ? ' · Teil: ' + esc(d.needs_part) : ''}</span></a></li>`).join('')}</ul></section>` : ''}
+      <h2 class="h2out">Mängel an dieser Baustelle</h2>
       ${mine.length ? `<ul class="defects">${mine.join('')}</ul>` : '<p class="muted">Keine Mängel gemeldet.</p>'}`;
 
     const f = document.getElementById('f-def');
@@ -332,20 +352,20 @@
 
   function renderInfo(main, tower, tpl, signoffs, pr) {
     main.innerHTML = `
-      <section class="card sec"><h2>Turm</h2>
-        <dl class="kv"><dt>Windpark</dt><dd>${esc(tower.park)}</dd><dt>Turm</dt><dd>${esc(tower.name)}</dd><dt>Typ</dt><dd>${esc(tpl.name)}</dd>
-        <dt>Kunde</dt><dd>${esc(tower.customer || '')}</dd><dt>Angelegt</dt><dd>${fmtDay(tower.created_at)} ${tower.created_by_name ? '· ' + esc(tower.created_by_name) : ''}</dd>
-        <dt>Status</dt><dd>${tower.status === 'abgeschlossen' ? 'Abgeschlossen' : 'In Arbeit'} · WLS ${pr.wls}% · Finishing ${pr.fin}%</dd></dl>
+      <section class="card sec"><h2>${tpl ? 'Turm' : 'Baustelle'}</h2>
+        <dl class="kv"><dt>${tpl ? 'Windpark' : 'Ort'}</dt><dd>${esc(tower.park)}</dd><dt>${tpl ? 'Turm' : 'Bezeichnung'}</dt><dd>${esc(tower.name)}</dd><dt>Typ</dt><dd>${tpl ? esc(tpl.name) : 'Sonstige Baustelle'}</dd>
+        <dt>Kunde</dt><dd>${esc(tower.customer || '')}</dd>${tower.address ? `<dt>Adresse</dt><dd>${esc(tower.address)}</dd>` : ''}<dt>Angelegt</dt><dd>${fmtDay(tower.created_at)} ${tower.created_by_name ? '· ' + esc(tower.created_by_name) : ''}</dd>
+        <dt>Status</dt><dd>${tower.status === 'abgeschlossen' ? 'Abgeschlossen' : 'In Arbeit'}${tpl ? ` · WLS ${pr.wls}% · Finishing ${pr.fin}%` : ''}</dd></dl>
         <div class="row wrapgap">
-          <a class="ghost" href="#/t/${tower.id}/protokoll">Protokoll anzeigen / drucken</a>
+          ${tpl ? `<a class="ghost" href="#/t/${tower.id}/protokoll">Protokoll anzeigen / drucken</a>` : ''}
           <button type="button" class="ghost" id="b-status">${tower.status === 'abgeschlossen' ? 'Wieder öffnen' : 'Als abgeschlossen ablegen'}</button>
-          <button type="button" class="ghost danger" id="b-del">Turm löschen</button>
+          <button type="button" class="ghost danger" id="b-del">${tpl ? 'Turm' : 'Baustelle'} löschen</button>
         </div>
         <p class="muted small" id="del-hint"></p>
       </section>
-      <section class="card sec"><h2>Ablauf Leitermontage</h2><ol class="flow">${tpl.flow.map(([h, p]) => `<li><b>${esc(h)}</b><p>${esc(p)}</p></li>`).join('')}</ol></section>
+      ${tpl ? `<section class="card sec"><h2>Ablauf Leitermontage</h2><ol class="flow">${tpl.flow.map(([h, p]) => `<li><b>${esc(h)}</b><p>${esc(p)}</p></li>`).join('')}</ol></section>
       <section class="card sec"><h2>Was bei diesem Turmtyp auffällt</h2>${tpl.hints.map(([k, h, p]) => `<div class="flag ${k}"><b>${esc(h)}</b><p>${esc(p)}</p></div>`).join('')}
-        <p class="muted small">Quelle: ${esc(tpl.source)}</p></section>`;
+        <p class="muted small">Quelle: ${esc(tpl.source)}</p></section>` : ''}`;
     document.getElementById('b-status').onclick = () => safe(async () => { await S.updateTower(tower.id, { status: tower.status === 'abgeschlossen' ? 'offen' : 'abgeschlossen' }); viewTower(tower.id, 'info'); });
     let armed = false;
     document.getElementById('b-del').onclick = e => {
@@ -361,7 +381,7 @@
     const team = profiles.filter(p => p.active);
     const myId = S.user().profileId;
     const dayChecks = checks.filter(c => isoDay(c.done_at) === date);
-    const done = ['wls', 'fin'].flatMap(p => window.summarizeDay(tpl, p, dayChecks).map(x => ({ ...x, phase: tpl.phases[p].title })));
+    const done = tpl ? ['wls', 'fin'].flatMap(p => window.summarizeDay(tpl, p, dayChecks).map(x => ({ ...x, phase: tpl.phases[p].title }))) : [];
     const dayDefects = defects.filter(d => isoDay(d.created_at) === date);
     const mhWork = wds.reduce((s, w) => s + hoursOf(w.start_time, w.end_time, w.pause_min) * w.persons, 0);
     const mhRegie = rgs.reduce((s, r) => s + hoursOf(r.start_time, r.end_time) * r.persons, 0);
@@ -382,7 +402,7 @@
 
       <section class="card sec">
         <h2>Arbeitszeit</h2>
-        <p class="muted small">Gesamte Zeit vor Ort an diesem Turm. Ein Eintrag pro Truppe oder Zeitblock. Wer ausgewählt ist, bekommt die Zeit unter „Meine Zeit“ als Vorschlag.</p>
+        <p class="muted small">Gesamte Zeit vor Ort an dieser Baustelle. Ein Eintrag pro Truppe oder Zeitblock. Wer ausgewählt ist, bekommt die Zeit unter „Meine Zeit“ als Vorschlag.</p>
         ${wds.length ? `<ul class="entries">${wds.map(w => { const hh = hoursOf(w.start_time, w.end_time, w.pause_min); return `<li>
           <div class="row between"><b class="mono">${esc(w.start_time)}–${esc(w.end_time)}</b><span class="num">${h(hh)} h × ${w.persons} = <b>${h(hh * w.persons)} Mh</b></span></div>
           <div class="muted small">${w.persons} Personen${w.names ? ': ' + esc(w.names) : ''} · Pause ${w.pause_min} min</div>
@@ -519,7 +539,7 @@
           ${x.done.length ? `<h3>Erledigt</h3><ul class="donelist">${x.done.map(d => `<li><span class="muted small">${esc(d.section)}</span>${esc(d.text)}</li>`).join('')}</ul>` : ''}
           ${x.r.length ? `<h3>Regiearbeiten</h3><table class="rep"><thead><tr><th>Zeit</th><th>Tätigkeit</th><th>Angeordnet von</th><th>Pers.</th><th class="r">Mh</th></tr></thead><tbody>${x.r.map(r => `<tr><td class="mono">${esc(r.start_time)}–${esc(r.end_time)}</td><td>${esc(r.description)}${r.material ? '<br><span class="muted">Material: ' + esc(r.material) + '</span>' : ''}</td><td>${esc(r.ordered_by)}</td><td>${r.persons}</td><td class="r num">${h(hoursOf(r.start_time, r.end_time) * r.persons)}</td></tr>`).join('')}</tbody></table>` : ''}
           ${x.def.length ? `<h3>Neue Mängel</h3><ul class="donelist">${x.def.map(d => `<li>${esc(d.title)}${d.location ? ' · ' + esc(d.location) : ''}${d.needs_part ? ' · Teil: ' + esc(d.needs_part) : ''}</li>`).join('')}</ul>` : ''}
-        </section>`).join('') : `<div class="card empty"><p><b>Für diesen Tag ist noch nichts eingetragen.</b></p><p class="muted">Arbeitszeit und Regie trägt das Team im Turm unter „Tag“ ein.</p></div>`}
+        </section>`).join('') : `<div class="card empty"><p><b>Für diesen Tag ist noch nichts eingetragen.</b></p><p class="muted">Arbeitszeit und Regie trägt das Team bei der Baustelle unter „Tag“ ein.</p></div>`}
         ${rows.length ? `<div class="signs"><div><span></span>Deliri GmbH, Name / Unterschrift</div><div><span></span>Auftraggeber, Name / Unterschrift</div></div>` : ''}
       </main>`;
     bindLogout();
@@ -685,6 +705,9 @@
   // Ist-Minuten für den Gleitzeitsaldo: Arbeit + Fahrzeit, Urlaub/Krankenstand mit Stunden gutgeschrieben, ZA = 0
   const istMin = e => pending(e) || e.kind === 'za' ? 0 : ABSENT(e.kind) ? (+e.hours || 0) * 60 : workMin(e) + (+e.travel_min || 0);
 
+  // Stempeluhr-Zustand: Anreise, Arbeit oder Abreise
+  const clockState = e => e.travel_started && !e.start_time ? 'anreise' : e.travel_started && e.end_time ? 'abreise' : 'arbeit';
+  const travelSoFar = e => { if (!e.travel_started) return 0; let q = toMin(nowHM()) - toMin(e.travel_started); if (q < 0 || e.work_date !== today() && clockState(e) === 'anreise') q += 1440; return q; };
   // Automatische Pause: ab mehr als 6 h Arbeit mindestens 30 min (gibt neue Pause zurück oder 0)
   const autoPause = e => { if (!e.start_time || !e.end_time) return 0; const span = spanMin(e); return span - (+e.pause_min || 0) > 360 && (+e.pause_min || 0) < 30 ? 30 : 0; };
 
@@ -785,7 +808,7 @@
 
     const back = self ? '#/' : '#/team/' + month;
     const editable = !locked;
-    const towerOpts = sel => `<option value="">Kein Turm</option>${towers.filter(t => t.status !== 'abgeschlossen' || t.id === sel).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.park + ' · ' + t.name)}</option>`).join('')}`;
+    const towerOpts = sel => `<option value="">Keine Baustelle</option>${towers.filter(t => t.status !== 'abgeschlossen' || t.id === sel).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.park + ' · ' + t.name)}</option>`).join('')}`;
     const running = self ? open[0] : null;
     const cols = printMode ? 6 : 7;
     const desc = e => ABSENT(e.kind) ? `<span class="pill k-${e.kind}">${KINDS[e.kind]}</span> ${dec(+e.hours || dailySoll(person) / 60)} h${pending(e) ? ' <span class="pill bad">beantragt</span>' : ''}` :
@@ -811,20 +834,29 @@
     app.innerHTML = `<div class="noprint">${header(`<div class="sub">${self ? 'Meine Zeit' : 'Arbeitszeit'}</div><div class="brand sm">${esc(person.name)}</div>`, back)}${self ? topnav('zeit') : ''}</div>
       <main class="wrap timeview">
         ${self && !printMode ? `<section class="card clock">
-          ${running ? `<div><div class="eyebrow">${running.pause_started ? 'Pause seit ' + esc(running.pause_started) : 'Arbeit läuft'}</div>
-              <div class="clockbig">${esc(running.start_time)} <span class="muted">seit</span></div>
-              <div class="muted small">${running.work_date !== today() ? '⚠ Gestartet am ' + fmtDay(running.work_date) + '. Bitte Endzeit nachtragen.' : 'Bisher ' + hm(workMin(running)) + ' h'}${running.tower_id ? ' · ' + esc(tName(running.tower_id)) : ''}</div></div>
-            <div class="clockbtns">
-              ${running.work_date === today() ? (running.pause_started ? `<button type="button" class="primary" id="c-pause-end">Pause beenden</button>` : `<button type="button" class="ghost" id="c-pause">Pause starten</button>`) : ''}
-              ${running.work_date === today() ? `<button type="button" class="primary dark" id="c-stop">Arbeit beenden</button>` : `<button type="button" class="ghost" data-edit="${running.id}">Endzeit nachtragen</button>`}
-            </div>`
+          ${running ? (() => {
+              const st = clockState(running), site = running.tower_id ? ' · ' + esc(tName(running.tower_id)) : '', old = running.work_date !== today();
+              if (st === 'anreise') return `<div><div class="eyebrow">Anreise läuft</div><div class="clockbig">${esc(running.travel_started)} <span class="muted">seit</span></div>
+                  <div class="muted small">${old ? '⚠ Gestartet am ' + fmtDay(running.work_date) + '. ' : ''}Fahrzeit bisher ${hm(travelSoFar(running))} h${site}</div></div>
+                <div class="clockbtns"><button type="button" class="primary" id="c-arrive">Angekommen, Arbeit starten</button>${old ? `<button type="button" class="ghost" data-edit="${running.id}">Nachtragen</button>` : ''}</div>`;
+              if (st === 'abreise') return `<div><div class="eyebrow">Abreise läuft</div><div class="clockbig">${esc(running.travel_started)} <span class="muted">seit</span></div>
+                  <div class="muted small">Arbeit ${esc(running.start_time || '')}–${esc(running.end_time)} · Fahrzeit bisher ${hm(travelSoFar(running))} h${site}</div></div>
+                <div class="clockbtns"><button type="button" class="primary dark" id="c-home">Angekommen, Abreise beenden</button></div>`;
+              return `<div><div class="eyebrow">${running.pause_started ? 'Pause seit ' + esc(running.pause_started) : 'Arbeit läuft'}</div>
+                  <div class="clockbig">${esc(running.start_time)} <span class="muted">seit</span></div>
+                  <div class="muted small">${old ? '⚠ Gestartet am ' + fmtDay(running.work_date) + '. Bitte Endzeit nachtragen.' : 'Bisher ' + hm(workMin(running)) + ' h'}${running.travel_min ? ' · Anreise ' + hm(running.travel_min) + ' h' : ''}${site}</div></div>
+                <div class="clockbtns">
+                  ${!old ? (running.pause_started ? `<button type="button" class="primary" id="c-pause-end">Pause beenden</button>` : `<button type="button" class="ghost" id="c-pause">Pause starten</button>`) : ''}
+                  ${!old ? `<button type="button" class="ghost" id="c-stop">Arbeit beenden</button><button type="button" class="primary dark" id="c-stop-travel">Arbeit beenden, Abreise starten</button>` : `<button type="button" class="ghost" data-edit="${running.id}">Endzeit nachtragen</button>`}
+                </div>`;
+            })()
           : `<div><div class="eyebrow">Stempeluhr</div><div class="clockbig">${nowHM()}</div>
-              <label class="fld small">Turm (optional)<select id="c-tower">${towerOpts('')}</select></label></div>
-            <div class="clockbtns"><button type="button" class="primary" id="c-start">Arbeit starten</button></div>`}
+              <label class="fld small">Baustelle<select id="c-tower">${towerOpts('')}</select></label></div>
+            <div class="clockbtns"><button type="button" class="ghost" id="c-travel">Anreise starten</button><button type="button" class="primary" id="c-start">Arbeit starten</button></div>`}
         </section>` : ''}
 
         ${suggestions.length && !printMode ? `<section class="card sec note">
-          <h2>Vom Turm übernehmen</h2>
+          <h2>Von der Baustelle übernehmen</h2>
           <p class="muted small">Du warst hier als dabei eingetragen. Prüfen, Fahrzeit ergänzen, speichern.</p>
           <ul class="entries">${suggestions.map((w, i) => `<li><div class="row between"><span><b>${fmtDay(w.work_date)}</b> · ${esc(tName(w.tower_id))}</span><span class="mono">${esc(w.start_time)}–${esc(w.end_time)}</span></div>
             <div class="row between"><span class="muted small">Pause ${w.pause_min} min · eingetragen von ${esc(w.created_by_name)}</span><button type="button" class="ghost small" data-sug="${i}">Übernehmen</button></div></li>`).join('')}</ul>
@@ -863,7 +895,7 @@
           <div class="two">
             <label class="fld">Datum<input type="date" id="t-date" value="${month === today().slice(0, 7) ? today() : from}" required></label>
             <label class="fld only-abs">Bis (mehrere Tage)<input type="date" id="t-dateto"></label>
-            <label class="fld only-work">Turm<select id="t-tower">${towerOpts('')}</select></label>
+            <label class="fld only-work">Baustelle<select id="t-tower">${towerOpts('')}</select></label>
           </div>
           <div class="three only-work">
             <label class="fld">Von<input type="time" id="t-start" value="07:00"></label>
@@ -872,7 +904,7 @@
           </div>
           <div class="two only-work">
             <label class="fld">Fahrzeit (min)<input type="number" id="t-travel" value="0" min="0" step="5" inputmode="numeric"></label>
-            <label class="fld">Ort (wenn kein Turm)<input id="t-loc" placeholder="z.B. Büro, Lager, Schulung"></label>
+            <label class="fld">Ort (wenn keine Baustelle)<input id="t-loc" placeholder="z.B. Büro, Lager, Schulung"></label>
           </div>
           <fieldset class="crew trip only-work"><legend>Fahrt und Diäten</legend>
             <div class="two">
@@ -928,7 +960,11 @@
     const base = { profile_id: pid };
 
     // Stempeluhr
-    if ($('c-start')) $('c-start').onclick = () => safe(async () => { await S.saveTime({ ...base, kind: 'arbeit', work_date: today(), start_time: nowHM(), tower_id: $('c-tower').value || null }); toast('Arbeit gestartet ' + nowHM()); reload(); });
+    const siteDest = tid => { const t = towers.find(x => x.id === tid); return t ? { to_place: t.address || (t.name + ', ' + t.park) } : {}; };
+    if ($('c-start')) $('c-start').onclick = () => safe(async () => { const tid = $('c-tower').value || null; await S.saveTime({ ...base, kind: 'arbeit', status: 'genehmigt', work_date: today(), start_time: nowHM(), tower_id: tid, ...siteDest(tid) }); toast('Arbeit gestartet ' + nowHM()); reload(); });
+    if ($('c-travel')) $('c-travel').onclick = () => safe(async () => { const tid = $('c-tower').value || null; await S.saveTime({ ...base, kind: 'arbeit', status: 'genehmigt', work_date: today(), start_time: null, travel_started: nowHM(), tower_id: tid, trip: !!tid, ...siteDest(tid) }); toast('Anreise gestartet ' + nowHM()); reload(); });
+    if ($('c-arrive')) $('c-arrive').onclick = () => safe(async () => { await S.saveTime({ id: running.id, travel_min: (+running.travel_min || 0) + travelSoFar(running), travel_started: null, start_time: nowHM() }); toast('Angekommen. Arbeit gestartet ' + nowHM()); reload(); });
+    if ($('c-home')) $('c-home').onclick = () => safe(async () => { await S.saveTime({ id: running.id, travel_min: (+running.travel_min || 0) + travelSoFar(running), travel_started: null }); toast('Abreise beendet ' + nowHM() + '. Fahrzeit gespeichert.'); reload(); });
     if ($('c-pause')) $('c-pause').onclick = () => safe(async () => { await S.saveTime({ id: running.id, pause_started: nowHM() }); reload(); });
     if ($('c-pause-end')) $('c-pause-end').onclick = () => safe(async () => {
       let q = toMin(nowHM()) - toMin(running.pause_started); if (q < 0) q += 1440;
@@ -939,6 +975,12 @@
       if (running.pause_started) { let q = toMin(nowHM()) - toMin(running.pause_started); if (q < 0) q += 1440; patch.pause_min = (+running.pause_min || 0) + q; patch.pause_started = null; }
       const auto = autoPause({ ...running, ...patch }); if (auto) patch.pause_min = auto;
       await S.saveTime(patch); toast('Arbeit beendet ' + nowHM() + (auto ? '. Pause auf 30 min ergänzt (Pflicht ab 6 h).' : '')); reload();
+    });
+    if ($('c-stop-travel')) $('c-stop-travel').onclick = () => safe(async () => {
+      const patch = { id: running.id, end_time: nowHM(), travel_started: nowHM() };
+      if (running.pause_started) { let q = toMin(nowHM()) - toMin(running.pause_started); if (q < 0) q += 1440; patch.pause_min = (+running.pause_min || 0) + q; patch.pause_started = null; }
+      const auto = autoPause({ ...running, ...patch }); if (auto) patch.pause_min = auto;
+      await S.saveTime(patch); toast('Arbeit beendet, Abreise läuft' + (auto ? '. Pause auf 30 min ergänzt.' : '')); reload();
     });
 
     // Formular
@@ -978,7 +1020,7 @@
           }
           const row = { ...base, kind: k, hours: null, work_date: date, start_time: $('t-start').value, end_time: $('t-end').value || null, pause_min: +$('t-pause').value || 0,
             travel_min: +$('t-travel').value || 0, tower_id: $('t-tower').value || null, location: $('t-loc').value.trim(), overnight: $('t-night').checked, note: $('t-note').value.trim(),
-            from_place: $('t-from').value.trim(), to_place: $('t-to').value.trim(), to_country: $('t-cc').value || 'AT', km: Math.round(+$('t-km').value || 0), vehicle: $('t-veh').value, trip: $('t-trip').checked, allowances: {} };
+            travel_started: null, from_place: $('t-from').value.trim(), to_place: $('t-to').value.trim(), to_country: $('t-cc').value || 'AT', km: Math.round(+$('t-km').value || 0), vehicle: $('t-veh').value, trip: $('t-trip').checked, allowances: {} };
           document.querySelectorAll('[data-al]:checked').forEach(c => { const hEl = document.querySelector(`[data-alh="${c.dataset.al}"]`); row.allowances[c.dataset.al] = hEl ? (+String(hEl.value).replace(',', '.') || Math.round(workMin({ ...row, kind: 'arbeit' }) / 30) / 2) : 1; });
           if (row.vehicle === 'privat' && row.km > 0 && (!row.from_place || !row.to_place)) { toast('Für Kilometergeld bitte Abfahrts- und Ankunftsort angeben (Fahrtenbuch).', true); return; }
           if (id) row.id = id;
@@ -991,6 +1033,7 @@
       };
       $('t-cancel').onclick = () => reload();
       $('t-veh').value = person.company_car === false ? 'privat' : 'firma';
+      $('t-tower').onchange = () => { const d = siteDest($('t-tower').value); if (d.to_place && !$('t-to').value) { $('t-to').value = d.to_place; delete $('t-to').dataset.lat; } };
       placeInput($('t-from'), $('sg-from'));
       placeInput($('t-to'), $('sg-to'), pl => { if (pl.cc && ($('t-cc').querySelector(`option[value="${pl.cc}"]`))) $('t-cc').value = pl.cc; });
       $('t-route').onclick = () => safe(async () => {
@@ -1018,7 +1061,7 @@
     $('x-csv').onclick = () => {
       const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', h2 = m => (m / 60).toFixed(2).replace('.', ',');
       const al = cfg.allowances || [];
-      const lines = [['Mitarbeiter', 'Datum', 'Wochentag', 'Art', 'Beginn', 'Ende', 'Pause (min)', 'Fahrzeit (min)', 'Stunden', 'Turm / Ort', 'Abfahrtsort', 'Ankunftsort', 'Land', 'km', 'Fahrzeug', 'Dienstreise', 'Nächtigung', ...al.map(a => a.name + (a.unit === 'stunde' ? ' (h)' : ' (Tage)')), 'Notiz', 'Hinweise'].map(q).join(';')];
+      const lines = [['Mitarbeiter', 'Datum', 'Wochentag', 'Art', 'Beginn', 'Ende', 'Pause (min)', 'Fahrzeit (min)', 'Stunden', 'Baustelle / Ort', 'Abfahrtsort', 'Ankunftsort', 'Land', 'km', 'Fahrzeug', 'Dienstreise', 'Nächtigung', ...al.map(a => a.name + (a.unit === 'stunde' ? ' (h)' : ' (Tage)')), 'Notiz', 'Hinweise'].map(q).join(';')];
       days.forEach(d => stats[d].list.forEach(e => lines.push([person.name, d.split('-').reverse().join('.'), wd(d), KINDS[e.kind || 'arbeit'], e.start_time || '', e.end_time || '', ABSENT(e.kind) ? '' : e.pause_min || 0, e.travel_min || 0,
         h2(istMin(e)), e.tower_id ? tName(e.tower_id) : e.location, e.from_place || '', e.to_place || '', e.to_country || '', e.km || '', ABSENT(e.kind) ? '' : ({ firma: 'Firmenwagen', privat: 'Privatauto', keins: 'Mitfahrer' }[e.vehicle] || ''),
         e.trip ? 'ja' : '', e.overnight ? 'ja' : '', ...al.map(a => (e.allowances || {})[a.id] != null ? String((e.allowances || {})[a.id]).replace('.', ',') : ''), e.note, stats[d].warn.join(', ')].map(q).join(';'))));

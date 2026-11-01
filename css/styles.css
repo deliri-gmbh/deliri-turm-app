@@ -288,3 +288,5 @@ table.timetbl td:first-child,table.teamtbl td:first-child{width:auto;text-align:
 .pill.k-pflege,.pill.k-sonder{background:#dcefff;color:#0b5aa0}
 .pill.k-arzt{background:var(--bg);color:var(--ink);border:1px solid var(--line)}
 .primary.small{min-height:36px;padding:6px 12px;font-size:14px}
+#f-new[data-kind=turm] .only-site,#f-new[data-kind=baustelle] .only-turm{display:none!important}
+.clockbtns .ghost{min-height:46px}

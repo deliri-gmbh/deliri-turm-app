@@ -23,7 +23,7 @@ Ohne Datenbank läuft die App im **Demo-Modus**: Alles bleibt dann nur auf dem e
 
 ### 1. Datenbank bei Supabase (kostenlos)
 1. Auf https://supabase.com ein Konto anlegen, dann **New project**. Name `deliri-turm-app`, Region **Frankfurt (eu-central-1)**, ein Datenbank-Passwort vergeben und sicher aufheben.
-2. Links **SQL Editor** öffnen und den Inhalt von `supabase/schema.sql` einfügen, dann **Run**. Danach genauso `supabase/02_zeiterfassung.sql` , `supabase/03_reisen_zulagen.sql` und `supabase/04_kollektivvertrag.sql` ausführen. Damit sind Tabellen, Zugriffsregeln, Zeiterfassung und der Fotospeicher angelegt.
+2. Links **SQL Editor** öffnen und den Inhalt von `supabase/schema.sql` einfügen, dann **Run**. Danach genauso `supabase/02_zeiterfassung.sql` , `supabase/03_reisen_zulagen.sql` , `supabase/04_kollektivvertrag.sql` und `supabase/05_baustellen_anreise.sql` ausführen. Damit sind Tabellen, Zugriffsregeln, Zeiterfassung und der Fotospeicher angelegt.
 3. **Authentication → Sign In / Providers**: *Allow new users to sign up* **ausschalten**. So kann sich niemand Fremder registrieren.
 4. **Authentication → URL Configuration**: Bei *Site URL* die spätere App-Adresse eintragen (siehe Schritt 2), z.B. `https://DEINNAME.github.io/deliri-turm-app/`.
 5. **Project Settings → API**: *Project URL* und den **anon public** Key kopieren. Beide in `config.js` eintragen. Den `service_role` Key **niemals** dort eintragen.
