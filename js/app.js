@@ -541,8 +541,11 @@
   const hmSigned = min => (min > 0 ? '+' : '') + hm(min);
   const dec = (n, d = 2) => (Math.round(n * 10 ** d) / 10 ** d).toLocaleString('de-AT', { maximumFractionDigits: d });
   const kw = s => { const d = new Date(s + 'T12:00'); d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); const w1 = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - w1) / 864e5 - 3 + ((w1.getDay() + 6) % 7)) / 7); };
-  const KINDS = { arbeit: 'Arbeit', schulung: 'Schulung', urlaub: 'Urlaub', krank: 'Krankenstand', za: 'Zeitausgleich' };
-  const ABSENT = k => k === 'urlaub' || k === 'krank' || k === 'za';
+  const KINDS = { arbeit: 'Arbeit', schulung: 'Schulung', urlaub: 'Urlaub', krank: 'Krankenstand', za: 'Zeitausgleich', pflege: 'Pflegeurlaub', sonder: 'Sonderurlaub', arzt: 'Arzt / Behörde' };
+  const ABSENT = k => ['urlaub', 'krank', 'za', 'pflege', 'sonder', 'arzt'].includes(k);
+  const NEEDS_OK = k => k === 'urlaub' || k === 'za';
+  const pending = e => e.status === 'beantragt';
+  const WDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'Feiertag'];
 
   // Gesetzliche Feiertage Österreich
   const holCache = {};
@@ -560,28 +563,56 @@
   const holidayName = d => holidaysAT(+d.slice(0, 4)).get(d) || '';
   const isWorkday = d => { const w = new Date(d + 'T12:00').getDay(); return w >= 1 && w <= 5 && !holidayName(d); };
   const dailySoll = p => (+p.weekly_hours || 40) * 60 / 5;
-  const startOf = p => p.balance_date || (p.created_at ? p.created_at.slice(0, 8) + '01' : today().slice(0, 8) + '01');
+  const startOf = p => p.balance_date || p.entry_date || (p.created_at ? p.created_at.slice(0, 8) + '01' : today().slice(0, 8) + '01');
 
   // ---------- Reisekosten: Sätze, Diäten, Orte ----------
+  // Startwerte wie in ARTimer: Taggeld pro angefangene Stunde, max. 12 h je 24-h-Block; Zuschläge 50 % nachts (Mo bis Sa), 100 % Sonntag
   const DEFAULT_SETTINGS = {
-    km_rate: 0.5, taggeld_inland: 30, naechtigung_inland: 17,
+    km_rate: 0.5, diet_min_hours: 0, diet_max_hours: 12,
     countries: [
-      { code: 'DE', name: 'Deutschland', tag: 35.3, nacht: 27.9 }, { code: 'CZ', name: 'Tschechien', tag: 31, nacht: 24.4 },
-      { code: 'SK', name: 'Slowakei', tag: 27.9, nacht: 15.9 }, { code: 'HU', name: 'Ungarn', tag: 26.6, nacht: 26.6 },
-      { code: 'SI', name: 'Slowenien', tag: 31, nacht: 23.3 }, { code: 'IT', name: 'Italien', tag: 35.8, nacht: 27.9 },
-      { code: 'CH', name: 'Schweiz', tag: 36.8, nacht: 32.7 }, { code: 'PL', name: 'Polen', tag: 32.7, nacht: 25.1 },
-      { code: 'HR', name: 'Kroatien', tag: 31, nacht: 23.3 }
+      { code: 'AT', name: 'Österreich', rate_h: 2.5, nacht: 17 }, { code: 'DE', name: 'Deutschland', rate_h: 2.95, nacht: 27.9 },
+      { code: 'FR', name: 'Frankreich', rate_h: 2.73, nacht: 0 }, { code: 'IT', name: 'Italien', rate_h: 2.98, nacht: 27.9 },
+      { code: 'CH', name: 'Schweiz', rate_h: 2.2, nacht: 32.7 }, { code: 'SK', name: 'Slowakei', rate_h: 2.2, nacht: 15.9 },
+      { code: 'CZ', name: 'Tschechien', rate_h: 2.2, nacht: 24.4 }
     ],
+    surcharges: [
+      { id: 'nacht-abend', name: 'Nacht', pct: 50, from: '20:00', to: '24:00', days: [1, 2, 3, 4, 5, 6] },
+      { id: 'nacht-frueh', name: 'Nacht', pct: 50, from: '00:00', to: '04:00', days: [1, 2, 3, 4, 5, 6] },
+      { id: 'sonntag', name: 'Sonntag', pct: 100, from: '00:00', to: '24:00', days: [0] }
+    ],
+    limits: { day_h: 12, week_over_h: 13, month_over_h: 51 },
     allowances: [{ id: 'hoehe', name: 'Höhenzulage', unit: 'stunde', amount: 0 }, { id: 'gefahr', name: 'Gefahrenzulage', unit: 'stunde', amount: 0 }]
   };
   let SETTINGS = null;
-  async function getCfg() { if (!SETTINGS) { const d = await S.getSettings(); SETTINGS = { ...DEFAULT_SETTINGS, ...(d || {}) }; } return SETTINGS; }
+  async function getCfg() {
+    if (!SETTINGS) {
+      const d = { ...((await S.getSettings()) || {}) };
+      if (d.countries && !d.countries.some(c => 'rate_h' in c)) delete d.countries;   // alte Struktur verwerfen
+      SETTINGS = { ...DEFAULT_SETTINGS, ...d, limits: { ...DEFAULT_SETTINGS.limits, ...(d.limits || {}) } };
+    }
+    return SETTINGS;
+  }
+  // Zuschlagsminuten eines Arbeitseintrags je Regel (Fahrzeit zählt nicht)
+  function surchargeMin(e, rules) {
+    const out = {};
+    if (ABSENT(e.kind) || !e.start_time || !e.end_time || !rules?.length) return out;
+    const s = toMin(e.start_time); let en = toMin(e.end_time); if (en <= s) en += 1440;
+    for (let m = s; m < en; m++) {
+      const d = m >= 1440 ? shiftDay(e.work_date, 1) : e.work_date, tod = m % 1440;
+      const key = holidayName(d) ? 7 : new Date(d + 'T12:00').getDay();
+      rules.forEach(r => { const f = toMin(r.from), t = r.to === '24:00' ? 1440 : toMin(r.to);
+        if (r.days.includes(key) && (f < t ? tod >= f && tod < t : tod >= f || tod < t)) out[r.id] = (out[r.id] || 0) + 1; });
+    }
+    return out;
+  }
+  // Zuschläge nach Prozentsatz zusammenfassen, z.B. {50: 120, 100: 480} Minuten
+  const surByPct = (rules, mins) => { const r = {}; (rules || []).forEach(x => { if (mins[x.id]) r[x.pct] = (r[x.pct] || 0) + mins[x.id]; }); return r; };
   const eur = n => (n || 0).toLocaleString('de-AT', { style: 'currency', currency: 'EUR' });
-  const countryName = (cfg, cc) => cc === 'AT' || !cc ? 'Österreich' : (cfg.countries.find(c => c.code === cc)?.name || cc);
+  const countryName = (cfg, cc) => cfg.countries.find(c => c.code === (cc || 'AT'))?.name || cc;
   // Spanne Beginn bis Ende inkl. Pausen
   const spanMin = e => { if (!e.start_time || !e.end_time) return 0; let d = toMin(e.end_time) - toMin(e.start_time); if (d < 0) d += 1440; return d; };
-  // Taggeld: ab mehr als 3 Stunden je angefangene Stunde 1/12, höchstens der Tagessatz
-  const dietFor = (min, rate) => min > 180 ? Math.min(rate, rate / 12 * Math.ceil(min / 60)) : 0;
+  // Taggeld: je angefangene Stunde der Stundensatz, ab der Mindestdauer, höchstens die Höchststunden je Tag
+  const dietFor = (cfg, min, rateH) => min > 0 && min / 60 >= (+cfg.diet_min_hours || 0) ? Math.min(Math.ceil(min / 60), +cfg.diet_max_hours || 12) * rateH : 0;
   function travelCosts(cfg, entries) {
     const byDay = {};
     entries.filter(e => (e.kind || 'arbeit') === 'arbeit').forEach(e => (byDay[e.work_date] = byDay[e.work_date] || []).push(e));
@@ -594,12 +625,13 @@
       });
       const trips = list.filter(e => e.trip);
       const foreign = list.map(e => e.to_country).find(c => c && c !== 'AT');
-      const fr = foreign && cfg.countries.find(c => c.code === foreign);
+      const at = cfg.countries.find(c => c.code === 'AT') || { rate_h: 2.5, nacht: 17 };
+      const fr = foreign ? (cfg.countries.find(c => c.code === foreign) || at) : null;
       if (trips.length) {
         const dur = trips.reduce((a, e) => a + spanMin(e) + (+e.travel_min || 0), 0);
-        if (fr) r.dAusland += dietFor(dur, +fr.tag || 0); else r.dInland += dietFor(dur, +cfg.taggeld_inland || 0);
+        if (fr) r.dAusland += dietFor(cfg, dur, +fr.rate_h || 0); else r.dInland += dietFor(cfg, dur, +at.rate_h || 0);
       }
-      if (list.some(e => e.overnight)) { if (fr) r.nAusland += +fr.nacht || 0; else r.nInland += +cfg.naechtigung_inland || 0; }
+      if (list.some(e => e.overnight)) { if (fr) r.nAusland += +fr.nacht || 0; else r.nInland += +at.nacht || 0; }
     });
     r.kmGeld = r.kmPrivat * (+cfg.km_rate || 0);
     (cfg.allowances || []).forEach(a => { r.allowSum += (r.allow[a.id] || 0) * (+a.amount || 0); });
@@ -651,10 +683,14 @@
     return Math.max(0, d - p);
   }
   // Ist-Minuten für den Gleitzeitsaldo: Arbeit + Fahrzeit, Urlaub/Krankenstand mit Stunden gutgeschrieben, ZA = 0
-  const istMin = e => e.kind === 'urlaub' || e.kind === 'krank' ? (+e.hours || 0) * 60 : e.kind === 'za' ? 0 : workMin(e) + (+e.travel_min || 0);
+  const istMin = e => pending(e) || e.kind === 'za' ? 0 : ABSENT(e.kind) ? (+e.hours || 0) * 60 : workMin(e) + (+e.travel_min || 0);
+
+  // Automatische Pause: ab mehr als 6 h Arbeit mindestens 30 min (gibt neue Pause zurück oder 0)
+  const autoPause = e => { if (!e.start_time || !e.end_time) return 0; const span = spanMin(e); return span - (+e.pause_min || 0) > 360 && (+e.pause_min || 0) < 30 ? 30 : 0; };
 
   // Tageswerte und Hinweise nach AZG
-  function dayStats(entries, prevEntries) {
+  function dayStats(entries, prevEntries, cfg) {
+    const lim = (cfg || DEFAULT_SETTINGS).limits || DEFAULT_SETTINGS.limits;
     const days = {};
     entries.forEach(e => { (days[e.work_date] = days[e.work_date] || []).push(e); });
     const lastEnd = list => { let best = null; list.forEach(e => { if (!e.end_time || !e.start_time) return; let end = toMin(e.end_time); if (end < toMin(e.start_time)) end += 1440; best = best === null ? end : Math.max(best, end); }); return best; };
@@ -665,7 +701,7 @@
       const travel = timed.reduce((s, e) => s + (+e.travel_min || 0), 0), warn = [];
       if (timed.length) {
         if (work > 360 && pause < 30) warn.push('Pause unter 30 min bei über 6 h');
-        if (work > 600) warn.push('Über 10 h Arbeitszeit');
+        if (work > lim.day_h * 60) warn.push(`Über ${lim.day_h} h am Tag`);
         if (new Date(d + 'T12:00').getDay() === 0) warn.push('Arbeit am Sonntag');
         if (holidayName(d)) warn.push('Arbeit am Feiertag');
         if (timed.some(e => !e.end_time) && d < today()) warn.push('Nicht beendet, Endzeit fehlt');
@@ -691,13 +727,17 @@
     // Monat vor Stichtag: keine Saldoberechnung
     const active = mTo >= start;
     const inMonth = entries.filter(e => e.work_date >= mFrom && e.work_date <= mTo);
-    const dayCount = k => inMonth.filter(e => e.kind === k).reduce((a, e) => a + (+e.hours || ds / 60) / (ds / 60), 0);
-    let vac = +p.vacation_start || 0;
-    for (let y = +start.slice(0, 4) + 1; y <= +month.slice(0, 4); y++) vac += +p.vacation_per_year || 0;
-    const usedTotal = entries.filter(e => e.kind === 'urlaub' && e.work_date >= start && e.work_date <= mTo).reduce((a, e) => a + (+e.hours || ds / 60) / (ds / 60), 0);
+    const dayCount = k => inMonth.filter(e => e.kind === k && !pending(e)).reduce((a, e) => a + (+e.hours || ds / 60) / (ds / 60), 0);
+    // Urlaub aliquot: je Monat 1/12 des Jahresanspruchs, ab dem Monat nach dem Stichtag (bei Stichtag am 1. inklusive)
+    const months = (+month.slice(0, 4) - +start.slice(0, 4)) * 12 + (+month.slice(5, 7) - +start.slice(5, 7)) + (start.slice(8) === '01' ? 1 : 0);
+    const vac = (+p.vacation_start || 0) + (+p.vacation_per_year || 0) / 12 * Math.max(0, months);
+    const usedTotal = entries.filter(e => e.kind === 'urlaub' && !pending(e) && e.work_date >= start && e.work_date <= mTo).reduce((a, e) => a + (+e.hours || ds / 60) / (ds / 60), 0);
+    const sur = {}; inMonth.forEach(e => Object.entries(surchargeMin(e, (cfg || DEFAULT_SETTINGS).surcharges)).forEach(([k, v]) => { sur[k] = (sur[k] || 0) + v; }));
     return {
       active, start, soll, ist, diff: ist - soll, saldoPrev, saldoNew: saldoPrev + ist - soll,
       vacUsed: dayCount('urlaub'), vacLeft: vac - usedTotal, sick: dayCount('krank'), za: dayCount('za'),
+      pflege: dayCount('pflege'), sonder: dayCount('sonder'), arzt: inMonth.filter(e => e.kind === 'arzt').reduce((a, e) => a + (+e.hours || 0) * 60, 0),
+      sur, surPct: surByPct((cfg || DEFAULT_SETTINGS).surcharges, sur), pendingCount: inMonth.filter(pending).length,
       schulung: inMonth.filter(e => e.kind === 'schulung').reduce((a, e) => a + workMin(e), 0),
       work: inMonth.filter(e => e.kind === 'arbeit').reduce((a, e) => a + workMin(e), 0),
       travel: inMonth.reduce((a, e) => a + (+e.travel_min || 0), 0),
@@ -727,7 +767,7 @@
     const sign = signs[0];
     const locked = !!sign && !u.isAdmin;
     const tName = id => { const t = towers.find(x => x.id === id); return t ? t.park + ' · ' + t.name : ''; };
-    const stats = dayStats(entries, prevEntries);
+    const stats = dayStats(entries, prevEntries, cfg);
     // Feiertage an Werktagen als Info-Zeilen
     for (let d = from; d <= to; d = shiftDay(d, 1)) { const w = new Date(d + 'T12:00').getDay(); if (holidayName(d) && w >= 1 && w <= 5 && !stats[d]) stats[d] = { list: [], work: 0, pause: 0, travel: 0, warn: [], overnight: false }; }
     const days = Object.keys(stats).sort();
@@ -748,7 +788,7 @@
     const towerOpts = sel => `<option value="">Kein Turm</option>${towers.filter(t => t.status !== 'abgeschlossen' || t.id === sel).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.park + ' · ' + t.name)}</option>`).join('')}`;
     const running = self ? open[0] : null;
     const cols = printMode ? 6 : 7;
-    const desc = e => ABSENT(e.kind) ? `<span class="pill k-${e.kind}">${KINDS[e.kind]}</span> ${dec(+e.hours || dailySoll(person) / 60)} h` :
+    const desc = e => ABSENT(e.kind) ? `<span class="pill k-${e.kind}">${KINDS[e.kind]}</span> ${dec(+e.hours || dailySoll(person) / 60)} h${pending(e) ? ' <span class="pill bad">beantragt</span>' : ''}` :
       `${e.kind === 'schulung' ? '<span class="pill k-schulung">Schulung</span> ' : ''}${esc(e.tower_id ? tName(e.tower_id) : e.location)}${e.overnight ? ' <span class="pill">Nächtigung</span>' : ''}` +
       (e.from_place || e.to_place || +e.km ? `<br><span class="muted">${esc(e.from_place || '?')} → ${esc(e.to_place || '?')}${e.to_country && e.to_country !== 'AT' ? ' (' + esc(e.to_country) + ')' : ''} · ${dec(+e.km || 0, 0)} km ${e.vehicle === 'privat' ? 'privat' : e.vehicle === 'keins' ? 'Mitfahrer' : 'Firmenwagen'}${e.trip ? ' · Dienstreise' : ''}</span>` : '') +
       (Object.keys(e.allowances || {}).length ? `<br>${Object.entries(e.allowances).map(([id, v]) => { const a = (cfg.allowances || []).find(x => x.id === id); return a ? `<span class="pill k-zulage">${esc(a.name)}${a.unit === 'stunde' ? ' ' + dec(+v) + ' h' : ''}</span>` : ''; }).join(' ')}` : '');
@@ -765,7 +805,7 @@
           ${printMode ? '' : `<td class="nowrap noprint">${editable ? `<button type="button" class="ghost small" data-edit="${e.id}">Ändern</button> <button type="button" class="ghost small" data-del="${e.id}">Löschen</button>` : ''}</td>`}
         </tr>`).join('') : `<tr class="holrow"><td class="nowrap"><b>${d.slice(8)}.${d.slice(5, 7)}.</b> <span class="muted">${wd(d)}</span></td><td colspan="${cols - 1}" class="muted small">Feiertag: ${esc(hol)}</td></tr>`;
       return lines + (st.warn.length ? `<tr class="warnrow"><td colspan="${cols}">⚠ ${st.warn.map(esc).join(' · ')}</td></tr>` : '') +
-        (weekEnd ? `<tr class="weekrow"><td colspan="4">KW ${kw(d)}</td><td class="r num"><b>${hm(weeks[kw(d)])}</b></td><td colspan="${cols - 5}" class="small">${weeks[kw(d)] > 3600 ? '⚠ über 60 h in dieser Woche' : ''}</td></tr>` : '');
+        (weekEnd ? `<tr class="weekrow"><td colspan="4">KW ${kw(d)}</td><td class="r num"><b>${hm(weeks[kw(d)])}</b></td><td colspan="${cols - 5}" class="small">${weeks[kw(d)] > ((+person.weekly_hours || 40) + cfg.limits.week_over_h) * 60 ? `⚠ mehr als ${cfg.limits.week_over_h} Überstunden in dieser Woche` : ''}</td></tr>` : '');
     }).join('');
 
     app.innerHTML = `<div class="noprint">${header(`<div class="sub">${self ? 'Meine Zeit' : 'Arbeitszeit'}</div><div class="brand sm">${esc(person.name)}</div>`, back)}${self ? topnav('zeit') : ''}</div>
@@ -805,7 +845,10 @@
           <div class="kpi ${acc.saldoNew < 0 ? 'neg' : 'pos'}"><span>Gleitzeitsaldo</span><b>${hmSigned(acc.saldoNew)}</b><small>Übertrag ${hmSigned(acc.saldoPrev)}</small></div>
           <div class="kpi"><span>Resturlaub</span><b>${dec(acc.vacLeft, 1)}</b><small>Tage</small></div>
         </div>
-        <p class="muted small kpiline">Arbeit ${hm(acc.work)} · Fahrzeit ${hm(acc.travel)} · Schulung ${hm(acc.schulung)} · Urlaub ${dec(acc.vacUsed, 1)} T · Krankenstand ${dec(acc.sick, 1)} T · ZA ${dec(acc.za, 1)} T · Nächtigungen ${acc.nights}</p>
+        <p class="muted small kpiline">Arbeit ${hm(acc.work)} · Fahrzeit ${hm(acc.travel)} · Schulung ${hm(acc.schulung)} · Urlaub ${dec(acc.vacUsed, 1)} T · Krankenstand ${dec(acc.sick, 1)} T · ZA ${dec(acc.za, 1)} T${acc.pflege ? ' · Pflegeurlaub ' + dec(acc.pflege, 1) + ' T' : ''}${acc.sonder ? ' · Sonderurlaub ' + dec(acc.sonder, 1) + ' T' : ''}${acc.arzt ? ' · Arzt/Behörde ' + hm(acc.arzt) : ''} · Nächtigungen ${acc.nights}
+          ${Object.keys(acc.surPct).length ? '<br><b>Zuschläge:</b> ' + Object.entries(acc.surPct).map(([pct, m]) => `${pct} %: ${hm(m)} h`).join(' · ') : ''}</p>
+        ${acc.diff > cfg.limits.month_over_h * 60 ? `<p class="warn small">Mehr als ${cfg.limits.month_over_h} Überstunden in diesem Monat.</p>` : ''}
+        ${acc.pendingCount ? `<p class="note small">${acc.pendingCount > 1 ? acc.pendingCount + ' Anträge (Urlaub/Zeitausgleich) warten' : '1 Antrag (Urlaub/Zeitausgleich) wartet'} auf Genehmigung durch Ali. Erst danach zählt das im Saldo und Urlaubskonto.</p>` : ''}
         <div class="card costs"><div class="row between"><b>Reisekosten und Zulagen</b><b class="num">${eur(acc.tc.total)}</b></div>
           <div class="costgrid"><span>Kilometergeld (${dec(acc.tc.kmPrivat, 0)} km privat)</span><b>${eur(acc.tc.kmGeld)}</b><span>Diäten Inland</span><b>${eur(acc.tc.dInland)}</b><span>Diäten Ausland</span><b>${eur(acc.tc.dAusland)}</b>
           <span>Nächtigungsgeld</span><b>${eur(acc.tc.nInland + acc.tc.nAusland)}</b>${(cfg.allowances || []).filter(a => acc.tc.allow[a.id]).map(a => `<span>${esc(a.name)} (${dec(acc.tc.allow[a.id])} ${a.unit === 'stunde' ? 'h' : 'T'})</span><b>${eur(acc.tc.allow[a.id] * (+a.amount || 0))}</b>`).join('')}</div>
@@ -894,7 +937,8 @@
     if ($('c-stop')) $('c-stop').onclick = () => safe(async () => {
       const patch = { id: running.id, end_time: nowHM() };
       if (running.pause_started) { let q = toMin(nowHM()) - toMin(running.pause_started); if (q < 0) q += 1440; patch.pause_min = (+running.pause_min || 0) + q; patch.pause_started = null; }
-      await S.saveTime(patch); toast('Arbeit beendet ' + nowHM()); reload();
+      const auto = autoPause({ ...running, ...patch }); if (auto) patch.pause_min = auto;
+      await S.saveTime(patch); toast('Arbeit beendet ' + nowHM() + (auto ? '. Pause auf 30 min ergänzt (Pflicht ab 6 h).' : '')); reload();
     });
 
     // Formular
@@ -927,9 +971,10 @@
             if (upto < date) { toast('„Bis“ liegt vor dem Startdatum.', true); return; }
             const dates = []; for (let d = date; d <= upto; d = shiftDay(d, 1)) if (isWorkday(d) || date === upto) dates.push(d);
             if (!dates.length) { toast('Im gewählten Zeitraum ist kein Arbeitstag.', true); return; }
-            for (const d of dates) await S.saveTime({ ...(id ? { id } : base), kind: k, work_date: d, hours, start_time: null, end_time: null, pause_min: 0, travel_min: 0, tower_id: null, location: '', overnight: false, note: $('t-note').value.trim(),
+            const status = NEEDS_OK(k) && !u.isAdmin ? 'beantragt' : 'genehmigt';
+            for (const d of dates) await S.saveTime({ ...(id ? { id } : base), kind: k, status, work_date: d, hours, start_time: null, end_time: null, pause_min: 0, travel_min: 0, tower_id: null, location: '', overnight: false, note: $('t-note').value.trim(),
               from_place: '', to_place: '', to_country: 'AT', km: 0, vehicle: 'firma', trip: false, allowances: {} });
-            toast(KINDS[k] + (dates.length > 1 ? ` für ${dates.length} Arbeitstage` : '') + ' gespeichert'); reload(); return;
+            toast(KINDS[k] + (dates.length > 1 ? ` für ${dates.length} Arbeitstage` : '') + (status === 'beantragt' ? ' beantragt. Ali muss noch genehmigen.' : ' gespeichert')); reload(); return;
           }
           const row = { ...base, kind: k, hours: null, work_date: date, start_time: $('t-start').value, end_time: $('t-end').value || null, pause_min: +$('t-pause').value || 0,
             travel_min: +$('t-travel').value || 0, tower_id: $('t-tower').value || null, location: $('t-loc').value.trim(), overnight: $('t-night').checked, note: $('t-note').value.trim(),
@@ -939,10 +984,13 @@
           if (id) row.id = id;
           if (!row.start_time) { toast('Bitte eine Beginnzeit eintragen.', true); return; }
           if (!row.end_time && row.work_date !== today()) { toast('Bitte eine Endzeit eintragen.', true); return; }
-          await S.saveTime(row); toast('Gespeichert'); reload();
+          row.status = 'genehmigt';
+          const auto = autoPause(row); if (auto) row.pause_min = auto;
+          await S.saveTime(row); toast(auto ? 'Gespeichert. Pause auf 30 min ergänzt (Pflicht ab 6 h).' : 'Gespeichert'); reload();
         });
       };
       $('t-cancel').onclick = () => reload();
+      $('t-veh').value = person.company_car === false ? 'privat' : 'firma';
       placeInput($('t-from'), $('sg-from'));
       placeInput($('t-to'), $('sg-to'), pl => { if (pl.cc && ($('t-cc').querySelector(`option[value="${pl.cc}"]`))) $('t-cc').value = pl.cc; });
       $('t-route').onclick = () => safe(async () => {
@@ -997,6 +1045,11 @@
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
   }
 
+  const surRow = r => `<tr data-id="${esc(r.id || '')}"><td><input class="sn" value="${esc(r.name)}"></td><td><input class="sp" type="number" step="1" value="${r.pct}" style="width:64px"></td>
+    <td><input class="sf" type="time" value="${esc(r.from)}"></td><td><input class="st" type="time" value="${esc(r.to === '24:00' ? '00:00' : r.to)}"></td>
+    <td class="nowrap">${WDAYS.map((w, i) => `<label class="daybox"><input type="checkbox" class="sd" value="${i}" ${r.days.includes(i) ? 'checked' : ''}><span>${w === 'Feiertag' ? 'Ft' : w}</span></label>`).join('')}</td>
+    <td><button type="button" class="ghost small rm">×</button></td></tr>`;
+
   // ---------- Team (nur Admin) ----------
   async function viewTeam(month, printMode) {
     const u = S.user();
@@ -1005,26 +1058,27 @@
     const to = month + '-' + String(daysIn(month)).padStart(2, '0');
     const profiles = await S.listProfiles();
     const minStart = profiles.reduce((m, p) => startOf(p) < m ? startOf(p) : m, month + '-01');
-    const [entries, signs, cfg] = await Promise.all([S.listTime({ from: shiftDay(minStart, -1), to }), S.listMonthSignoffs({ month }), getCfg()]);
+    const [entries, signs, cfg, requests] = await Promise.all([S.listTime({ from: shiftDay(minStart, -1), to }), S.listMonthSignoffs({ month }), getCfg(), S.listRequests()]);
+    const pcts = [...new Set((cfg.surcharges || []).map(r => +r.pct))].sort((a, b) => a - b);
     const rows = profiles.filter(p => p.active).map(p => {
       const mine = entries.filter(e => e.profile_id === p.id);
-      const st = dayStats(mine.filter(e => e.work_date >= month + '-01'), []);
+      const st = dayStats(mine.filter(e => e.work_date >= month + '-01'), [], cfg);
       return { p, acc: accounts(p, mine, month, cfg), warn: Object.values(st).reduce((s, d) => s + d.warn.length, 0), sign: signs.find(x => x.profile_id === p.id) };
     });
     const csv = () => {
       const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"', h2 = m => (m / 60).toFixed(2).replace('.', ',');
       const al = cfg.allowances || [];
-      const head = ['Mitarbeiter', 'Art', 'Wochenstunden', 'Soll (h)', 'Ist (h)', 'Monat +/- (h)', 'Übertrag Vormonat (h)', 'Gleitzeitsaldo neu (h)', 'Urlaub genommen (Tage)', 'Resturlaub (Tage)', 'Krankenstand (Tage)', 'Zeitausgleich (Tage)', 'Schulung (h)', 'Fahrzeit (h)', 'Nächtigungen',
-        'km privat', 'Kilometergeld (EUR)', 'Diäten Inland (EUR)', 'Diäten Ausland (EUR)', 'Nächtigungsgeld (EUR)', ...al.flatMap(a => [a.name + (a.unit === 'stunde' ? ' (h)' : ' (Tage)'), a.name + ' (EUR)']), 'Monat bestätigt', 'Hinweise AZG'];
+      const head = ['Mitarbeiter', 'Art', 'Wochenstunden', 'Soll (h)', 'Ist (h)', 'Monat +/- (h)', 'Übertrag Vormonat (h)', 'Gleitzeitsaldo neu (h)', 'Urlaub genommen (Tage)', 'Resturlaub (Tage)', 'Krankenstand (Tage)', 'Zeitausgleich (Tage)', 'Pflegeurlaub (Tage)', 'Sonderurlaub (Tage)', 'Arzt/Behörde (h)', 'Schulung (h)', 'Fahrzeit (h)', 'Nächtigungen',
+        ...pcts.map(x => 'Zuschlag ' + x + ' % (h)'), 'km privat', 'Kilometergeld (EUR)', 'Diäten Inland (EUR)', 'Diäten Ausland (EUR)', 'Nächtigungsgeld (EUR)', ...al.flatMap(a => [a.name + (a.unit === 'stunde' ? ' (h)' : ' (Tage)'), a.name + ' (EUR)']), 'Monat bestätigt', 'Hinweise AZG'];
       return [head.map(q).join(';'), ...rows.map(({ p, acc, warn, sign }) => [p.name, p.kind === 'sub' ? 'Subunternehmer' : 'Angestellt', dec(+p.weekly_hours || 40), h2(acc.soll), h2(acc.ist), h2(acc.diff), h2(acc.saldoPrev), h2(acc.saldoNew),
-        dec(acc.vacUsed, 2), dec(acc.vacLeft, 2), dec(acc.sick, 2), dec(acc.za, 2), h2(acc.schulung), h2(acc.travel), acc.nights,
-        dec(acc.tc.kmPrivat, 0), dec(acc.tc.kmGeld), dec(acc.tc.dInland), dec(acc.tc.dAusland), dec(acc.tc.nInland + acc.tc.nAusland), ...al.flatMap(a => [dec(acc.tc.allow[a.id] || 0), dec((acc.tc.allow[a.id] || 0) * (+a.amount || 0))]),
+        dec(acc.vacUsed, 2), dec(acc.vacLeft, 2), dec(acc.sick, 2), dec(acc.za, 2), dec(acc.pflege, 2), dec(acc.sonder, 2), h2(acc.arzt), h2(acc.schulung), h2(acc.travel), acc.nights,
+        ...pcts.map(x => h2(acc.surPct[x] || 0)), dec(acc.tc.kmPrivat, 0), dec(acc.tc.kmGeld), dec(acc.tc.dInland), dec(acc.tc.dAusland), dec(acc.tc.nInland + acc.tc.nAusland), ...al.flatMap(a => [dec(acc.tc.allow[a.id] || 0), dec((acc.tc.allow[a.id] || 0) * (+a.amount || 0))]),
         sign ? 'ja, ' + fmtDay(sign.signed_at) : 'nein', warn].map(q).join(';'))].join('\r\n');
     };
-    const table = `<div class="tblwrap"><table class="rep teamtbl"><thead><tr><th>Name</th><th class="r">Soll</th><th class="r">Ist</th><th class="r">+/− Monat</th><th class="r">Übertrag</th><th class="r">Saldo neu</th><th class="r">Urlaub</th><th class="r">Rest&shy;urlaub</th><th class="r">Krank</th><th class="r">ZA</th><th class="r">Fahrt</th><th class="r">Nächt.</th><th class="r">km priv.</th><th class="r">Reisekosten</th><th class="r">Zulagen</th><th>Status</th>${printMode ? '' : '<th class="noprint"></th>'}</tr></thead><tbody>
+    const table = `<div class="tblwrap"><table class="rep teamtbl"><thead><tr><th>Name</th><th class="r">Soll</th><th class="r">Ist</th><th class="r">+/− Monat</th><th class="r">Übertrag</th><th class="r">Saldo neu</th><th class="r">Urlaub</th><th class="r">Rest&shy;urlaub</th><th class="r">Krank</th><th class="r">ZA</th><th class="r">Fahrt</th><th class="r">Nächt.</th>${pcts.map(x => `<th class="r">+${x} %</th>`).join('')}<th class="r">km priv.</th><th class="r">Reisekosten</th><th class="r">Zulagen</th><th>Status</th>${printMode ? '' : '<th class="noprint"></th>'}</tr></thead><tbody>
       ${rows.map(({ p, acc, warn, sign }) => `<tr><td class="nowrap"><b>${esc(p.name)}</b>${p.kind === 'sub' ? ' <span class="pill">Sub</span>' : ''}</td>
         <td class="r num">${hm(acc.soll)}</td><td class="r num">${hm(acc.ist)}</td><td class="r num ${acc.diff < 0 ? 'negt' : ''}">${hmSigned(acc.diff)}</td><td class="r num">${hmSigned(acc.saldoPrev)}</td><td class="r num ${acc.saldoNew < 0 ? 'negt' : ''}"><b>${hmSigned(acc.saldoNew)}</b></td>
-        <td class="r num">${dec(acc.vacUsed, 1)}</td><td class="r num"><b>${dec(acc.vacLeft, 1)}</b></td><td class="r num">${dec(acc.sick, 1)}</td><td class="r num">${dec(acc.za, 1)}</td><td class="r num">${hm(acc.travel)}</td><td class="r num">${acc.nights}</td>
+        <td class="r num">${dec(acc.vacUsed, 1)}</td><td class="r num"><b>${dec(acc.vacLeft, 1)}</b></td><td class="r num">${dec(acc.sick, 1)}</td><td class="r num">${dec(acc.za, 1)}</td><td class="r num">${hm(acc.travel)}</td><td class="r num">${acc.nights}</td>${pcts.map(x => `<td class="r num">${acc.surPct[x] ? hm(acc.surPct[x]) : ''}</td>`).join('')}
         <td class="r num">${dec(acc.tc.kmPrivat, 0)}</td><td class="r num">${eur(acc.tc.kmGeld + acc.tc.dInland + acc.tc.dAusland + acc.tc.nInland + acc.tc.nAusland)}</td><td class="r num">${eur(acc.tc.allowSum)}</td>
         <td class="nowrap">${sign ? '<span class="pill ok">bestätigt</span>' : '<span class="pill">offen</span>'}${warn ? ` <span class="pill bad">${warn} ⚠</span>` : ''}</td>
         ${printMode ? '' : `<td class="noprint"><a class="ghost small" href="#/zeit/${p.id}/${month}">Öffnen</a></td>`}</tr>`).join('')}
@@ -1032,7 +1086,7 @@
 
     if (printMode) {
       app.innerHTML = `<main class="wrap report"><div class="rephead"><div><div class="eyebrow">Deliri GmbH · Monatsübersicht Arbeitszeit</div><h1>${esc(monthLabel(month))}</h1><p class="muted">Gleitzeit, Saldo und Urlaub in Stunden (h:mm) bzw. Tagen. Erstellt ${fmt(new Date().toISOString())}</p></div></div>${table}
-        <p class="muted small">Saldo = Ist minus Soll (Soll ohne gesetzliche Feiertage). Ist enthält Arbeitszeit, Fahrzeit und Schulung; Urlaub und Krankenstand werden mit den eingetragenen Stunden gutgeschrieben, Zeitausgleich reduziert den Saldo.</p>
+        <p class="muted small">Saldo = Ist minus Soll (Soll ohne gesetzliche Feiertage). Ist enthält Arbeitszeit, Fahrzeit und Schulung. Urlaub, Krankenstand, Pflege- und Sonderurlaub sowie Arzt/Behörde werden mit den eingetragenen Stunden gutgeschrieben, Zeitausgleich reduziert den Saldo. Zuschläge: ${(cfg.surcharges || []).map(r => `${esc(r.name)} ${r.pct} % (${r.from}–${r.to}, ${r.days.map(d => WDAYS[d]).join(' ')})`).join('; ')}.</p>
         <div class="signs"><div><span></span>Deliri GmbH, Unterschrift</div><div><span></span>Datum</div></div></main>`;
       setTimeout(() => window.print(), 400); return;
     }
@@ -1040,6 +1094,12 @@
     app.innerHTML = header('<div class="brand">DELIRI</div><div class="sub">Team</div>') + topnav('team') + `
       <main class="wrap">
         <div class="card daybar"><a class="ghost small" href="#/team/${shiftMonth(month, -1)}" aria-label="Vormonat">‹</a><b class="monthname">${esc(monthLabel(month))}</b><a class="ghost small" href="#/team/${shiftMonth(month, 1)}" aria-label="Nächster Monat">›</a></div>
+        ${requests.length ? `<section class="card sec warnbox"><h2>Offene Anträge <span class="pill bad">${requests.length}</span></h2>
+          <ul class="entries">${requests.map(r => `<li><div class="row between"><b>${esc(profiles.find(p => p.id === r.profile_id)?.name || '?')}</b><span class="pill k-${r.kind}">${KINDS[r.kind]}</span></div>
+            <div class="row between wrapgap"><span class="small">${fmtDay(r.work_date)} (${wd(r.work_date)}) · ${dec(+r.hours || 8)} h${r.note ? ' · ' + esc(r.note) : ''}</span>
+            <span class="row"><button type="button" class="ghost small" data-rej="${r.id}">Ablehnen</button><button type="button" class="primary small" data-ok="${r.id}">Genehmigen</button></span></div></li>`).join('')}</ul>
+          ${requests.length > 1 ? '<button type="button" class="ghost small" id="rq-all">Alle genehmigen</button>' : ''}
+        </section>` : ''}
         <section class="card sec"><div class="row between wrapgap"><h2>Monatsübersicht für den Steuerberater</h2>
           <div class="row"><button type="button" class="ghost small" id="tm-print">Drucken / PDF</button><button type="button" class="ghost small" id="tm-csv">Excel (CSV)</button></div></div>
           ${rows.length ? table : '<p class="muted">Noch keine aktiven Mitarbeiter.</p>'}
@@ -1050,20 +1110,31 @@
           <form id="f-set" class="subform">
             <div class="three">
               <label class="fld">Kilometergeld €/km<input type="number" id="s-km" step="0.01" min="0" value="${cfg.km_rate}" inputmode="decimal"></label>
-              <label class="fld">Taggeld Inland €<input type="number" id="s-tag" step="0.01" min="0" value="${cfg.taggeld_inland}" inputmode="decimal"></label>
-              <label class="fld">Nächtigung Inland €<input type="number" id="s-nacht" step="0.01" min="0" value="${cfg.naechtigung_inland}" inputmode="decimal"></label>
+              <label class="fld">Taggeld ab Stunden<input type="number" id="s-dmin" step="0.5" min="0" value="${cfg.diet_min_hours}" inputmode="decimal"></label>
+              <label class="fld">Taggeld höchstens Stunden/Tag<input type="number" id="s-dmax" step="1" min="1" value="${cfg.diet_max_hours}" inputmode="numeric"></label>
             </div>
-            <h3>Auslandssätze (Tag / Nacht in €)</h3>
-            <div class="tblwrap"><table class="rep settbl"><thead><tr><th>Code</th><th>Land</th><th class="r">Tag</th><th class="r">Nacht</th><th></th></tr></thead><tbody id="s-cty">
-              ${cfg.countries.map(c => `<tr><td><input class="cc" value="${esc(c.code)}" maxlength="2"></td><td><input class="cn" value="${esc(c.name)}"></td><td><input class="ct" type="number" step="0.01" value="${c.tag}"></td><td><input class="cnn" type="number" step="0.01" value="${c.nacht}"></td><td><button type="button" class="ghost small rm">×</button></td></tr>`).join('')}
+            <h3>Taggeld und Nächtigung je Land</h3>
+            <div class="tblwrap"><table class="rep settbl"><thead><tr><th>Code</th><th>Land</th><th class="r">Taggeld €/Stunde</th><th class="r">Nächtigung €</th><th></th></tr></thead><tbody id="s-cty">
+              ${cfg.countries.map(c => `<tr><td><input class="cc" value="${esc(c.code)}" maxlength="2"></td><td><input class="cn" value="${esc(c.name)}"></td><td><input class="ct" type="number" step="0.01" value="${c.rate_h}"></td><td><input class="cnn" type="number" step="0.01" value="${c.nacht}"></td><td>${c.code === 'AT' ? '' : '<button type="button" class="ghost small rm">×</button>'}</td></tr>`).join('')}
             </tbody></table></div>
             <button type="button" class="ghost small" id="s-addc">+ Land</button>
+            <h3>Zuschläge</h3>
+            <div class="tblwrap"><table class="rep settbl"><thead><tr><th>Name</th><th class="r">%</th><th>Von</th><th>Bis</th><th>Tage</th><th></th></tr></thead><tbody id="s-sur">
+              ${(cfg.surcharges || []).map(r => surRow(r)).join('')}
+            </tbody></table></div>
+            <button type="button" class="ghost small" id="s-adds">+ Zuschlag</button>
+            <h3>Grenzen für Hinweise</h3>
+            <div class="three">
+              <label class="fld">Max. Stunden pro Tag<input type="number" id="s-lday" value="${cfg.limits.day_h}" min="1" step="0.5"></label>
+              <label class="fld">Max. Überstunden pro Woche<input type="number" id="s-lweek" value="${cfg.limits.week_over_h}" min="0" step="0.5"></label>
+              <label class="fld">Max. Überstunden pro Monat<input type="number" id="s-lmonth" value="${cfg.limits.month_over_h}" min="0" step="0.5"></label>
+            </div>
             <h3>Zulagen</h3>
             <div class="tblwrap"><table class="rep settbl"><thead><tr><th>Bezeichnung</th><th>Einheit</th><th class="r">€ je Einheit</th><th></th></tr></thead><tbody id="s-al">
               ${(cfg.allowances || []).map(a => `<tr data-id="${esc(a.id)}"><td><input class="an" value="${esc(a.name)}"></td><td><select class="au"><option value="stunde" ${a.unit === 'stunde' ? 'selected' : ''}>pro Stunde</option><option value="tag" ${a.unit === 'tag' ? 'selected' : ''}>pro Tag</option></select></td><td><input class="aa" type="number" step="0.01" value="${a.amount}"></td><td><button type="button" class="ghost small rm">×</button></td></tr>`).join('')}
             </tbody></table></div>
             <button type="button" class="ghost small" id="s-adda">+ Zulage</button>
-            <p class="muted small">Startwerte: gesetzliche Sätze (Kilometergeld 0,50 €, Taggeld 30 €, Nächtigung 17 €, Ausland laut Reisegebührenvorschrift). Wenn euer Kollektivvertrag andere Beträge vorsieht, hier anpassen. Bitte mit dem Steuerberater abstimmen.</p>
+            <p class="muted small">Startwerte aus eurem ARTimer: Taggeld pro angefangene Stunde (Österreich 2,50 €, Deutschland 2,95 € usw.), höchstens 12 Stunden pro Tag. Nächtigung Inland 17 €, Ausland laut Reisegebührenvorschrift, Kilometergeld 0,50 €. Zuschläge 50 % von 20 bis 4 Uhr (Mo bis Sa) und 100 % am Sonntag. Fahrzeit bekommt keinen Zuschlag. Bitte mit dem Steuerberater abstimmen.</p>
             <button class="primary" type="submit">Sätze speichern</button>
           </form>
         </details>
@@ -1083,13 +1154,17 @@
             <label class="fld">Wochenstunden<input type="number" id="p-week" value="40" min="0" max="60" step="0.5" inputmode="decimal"></label>
             <label class="fld">Urlaubsanspruch pro Jahr (Arbeitstage)<input type="number" id="p-vac" value="25" min="0" step="0.5" inputmode="decimal"></label>
           </div>
+          <div class="two">
+            <label class="fld">Eintritt<input type="date" id="p-entry"></label>
+            <label class="confirm"><input type="checkbox" id="p-car" checked> Fährt mit Firmenwagen</label>
+          </div>
           <fieldset class="crew startvals"><legend>Startwerte beim Umstieg (Stand aus ARTimer)</legend>
             <div class="three">
               <label class="fld">Stichtag<input type="date" id="p-bdate"></label>
               <label class="fld">Resturlaub (Tage)<input type="number" id="p-vstart" value="0" step="0.5" inputmode="decimal"></label>
               <label class="fld">Gleitzeitsaldo (Stunden)<input type="number" id="p-sstart" value="0" step="0.25" inputmode="decimal" placeholder="z.B. 12,5 oder -3"></label>
             </div>
-            <span class="muted small">Ab dem Stichtag rechnet die App Saldo und Urlaub selbst weiter. Der Jahresanspruch wird jeweils am 1. Jänner dazugezählt.</span>
+            <span class="muted small">Ab dem Stichtag rechnet die App Saldo und Urlaub selbst weiter. Der Urlaubsanspruch kommt monatlich aliquot dazu (1/12 pro Monat). Ohne Stichtag zählt das Eintrittsdatum.</span>
           </fieldset>
           <label class="confirm"><input type="checkbox" id="p-active" checked> Aktiv</label>
           <p class="muted small">Login: In Supabase einen Benutzer mit genau dieser E-Mail anlegen. Beim ersten Anmelden wird er automatisch mit diesem Mitarbeiter verknüpft.</p>
@@ -1098,30 +1173,39 @@
 
         <section class="card sec"><h2>Alle Mitarbeiter</h2>
           <ul class="entries">${profiles.map(p => `<li class="${p.active ? '' : 'inactive'}"><div class="row between"><b>${esc(p.name)}</b><span>${p.role === 'admin' ? '<span class="pill ok">Admin</span> ' : ''}${p.kind === 'sub' ? '<span class="pill">Sub</span> ' : ''}${p.active ? '' : '<span class="pill">inaktiv</span>'}</span></div>
-            <div class="row between"><span class="muted small">${esc(p.email || 'ohne E-Mail')} · ${p.user_id ? 'Login verknüpft' : 'noch kein Login'} · ${dec(+p.weekly_hours || 40)} h/Woche · Stichtag ${p.balance_date ? fmtDay(p.balance_date) : 'nicht gesetzt'}</span><button type="button" class="ghost small" data-p="${p.id}">Bearbeiten</button></div></li>`).join('')}</ul>
+            <div class="row between"><span class="muted small">${esc(p.email || 'ohne E-Mail')} · ${p.user_id ? 'Login verknüpft' : 'noch kein Login'} · ${dec(+p.weekly_hours || 40)} h/Woche · Eintritt ${p.entry_date ? fmtDay(p.entry_date) : '?'} · Stichtag ${p.balance_date ? fmtDay(p.balance_date) : 'nicht gesetzt'}</span><button type="button" class="ghost small" data-p="${p.id}">Bearbeiten</button></div></li>`).join('')}</ul>
         </section>
       </main>`;
     bindLogout();
     const $ = id => document.getElementById(id);
     $('tm-print').onclick = () => { location.hash = '#/team/' + month + '/druck'; };
+    document.querySelectorAll('[data-ok]').forEach(b => b.onclick = () => safe(async () => { await S.saveTime({ id: b.dataset.ok, status: 'genehmigt' }); toast('Genehmigt'); viewTeam(month); }));
+    document.querySelectorAll('[data-rej]').forEach(b => twoTap(b, 'Ablehnen', () => safe(async () => { await S.deleteTime(b.dataset.rej); toast('Abgelehnt und gelöscht'); viewTeam(month); })));
+    if ($('rq-all')) twoTap($('rq-all'), 'Alle genehmigen', () => safe(async () => { for (const r of requests) await S.saveTime({ id: r.id, status: 'genehmigt' }); toast('Alle genehmigt'); viewTeam(month); }));
     $('tm-csv').onclick = () => download(`Monatsuebersicht_Arbeitszeit_${month}.csv`, csv());
     document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
       const p = profiles.find(x => x.id === b.dataset.p);
       $('p-id').value = p.id; $('p-name').value = p.name; $('p-email').value = p.email || ''; $('p-kind').value = p.kind; $('p-role').value = p.role; $('p-active').checked = p.active;
       $('p-week').value = p.weekly_hours ?? 40; $('p-vac').value = p.vacation_per_year ?? 25; $('p-bdate').value = p.balance_date || ''; $('p-vstart').value = p.vacation_start ?? 0; $('p-sstart').value = (p.saldo_start_min || 0) / 60;
+      $('p-entry').value = p.entry_date || ''; $('p-car').checked = p.company_car !== false;
       $('p-title').textContent = 'Mitarbeiter bearbeiten'; $('p-cancel').hidden = false; $('f-prof').scrollIntoView({ behavior: 'smooth' });
     });
     $('p-cancel').onclick = () => viewTeam(month);
     const rmBind = () => document.querySelectorAll('#f-set .rm').forEach(b => b.onclick = () => b.closest('tr').remove());
     rmBind();
     $('s-addc').onclick = () => { $('s-cty').insertAdjacentHTML('beforeend', '<tr><td><input class="cc" maxlength="2"></td><td><input class="cn"></td><td><input class="ct" type="number" step="0.01"></td><td><input class="cnn" type="number" step="0.01"></td><td><button type="button" class="ghost small rm">×</button></td></tr>'); rmBind(); };
+    $('s-adds').onclick = () => { $('s-sur').insertAdjacentHTML('beforeend', surRow({ name: '', pct: 50, from: '20:00', to: '24:00', days: [1, 2, 3, 4, 5] })); rmBind(); };
     $('s-adda').onclick = () => { $('s-al').insertAdjacentHTML('beforeend', '<tr><td><input class="an" placeholder="z.B. Schmutzzulage"></td><td><select class="au"><option value="stunde">pro Stunde</option><option value="tag">pro Tag</option></select></td><td><input class="aa" type="number" step="0.01"></td><td><button type="button" class="ghost small rm">×</button></td></tr>'); rmBind(); };
     $('f-set').onsubmit = e => {
       e.preventDefault();
       const num = el => +String(el.value).replace(',', '.') || 0;
       const slug = t => t.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'zulage';
-      const data = { km_rate: num($('s-km')), taggeld_inland: num($('s-tag')), naechtigung_inland: num($('s-nacht')),
-        countries: [...$('s-cty').querySelectorAll('tr')].map(r => ({ code: r.querySelector('.cc').value.trim().toUpperCase(), name: r.querySelector('.cn').value.trim(), tag: num(r.querySelector('.ct')), nacht: num(r.querySelector('.cnn')) })).filter(c => c.code.length === 2 && c.name),
+      const data = { km_rate: num($('s-km')), diet_min_hours: num($('s-dmin')), diet_max_hours: num($('s-dmax')) || 12,
+        limits: { day_h: num($('s-lday')) || 12, week_over_h: num($('s-lweek')), month_over_h: num($('s-lmonth')) },
+        countries: [...$('s-cty').querySelectorAll('tr')].map(r => ({ code: r.querySelector('.cc').value.trim().toUpperCase(), name: r.querySelector('.cn').value.trim(), rate_h: num(r.querySelector('.ct')), nacht: num(r.querySelector('.cnn')) })).filter(c => c.code.length === 2 && c.name),
+        surcharges: [...$('s-sur').querySelectorAll('tr')].map(r => ({ id: r.dataset.id || 'z-' + Math.random().toString(36).slice(2, 7), name: r.querySelector('.sn').value.trim(), pct: num(r.querySelector('.sp')),
+          from: r.querySelector('.sf').value || '00:00', to: r.querySelector('.st').value === '00:00' || !r.querySelector('.st').value ? '24:00' : r.querySelector('.st').value,
+          days: [...r.querySelectorAll('.sd:checked')].map(c => +c.value) })).filter(r => r.name && r.pct && r.days.length),
         allowances: [...$('s-al').querySelectorAll('tr')].map(r => ({ id: r.dataset.id || slug(r.querySelector('.an').value) + '-' + Math.random().toString(36).slice(2, 6), name: r.querySelector('.an').value.trim(), unit: r.querySelector('.au').value, amount: num(r.querySelector('.aa')) })).filter(a => a.name) };
       safe(async () => { await S.saveSettings(data); SETTINGS = null; toast('Sätze gespeichert'); viewTeam(month); });
     };
@@ -1131,7 +1215,7 @@
         if ($('p-id').value === u.profileId && ($('p-role').value !== 'admin' || !$('p-active').checked)) { toast('Du kannst dir selbst die Admin-Rechte nicht entziehen.', true); return; }
         await S.saveProfile({ id: $('p-id').value || undefined, name: $('p-name').value.trim(), email: $('p-email').value.trim(), kind: $('p-kind').value, role: $('p-role').value, active: $('p-active').checked,
           weekly_hours: +$('p-week').value || 40, vacation_per_year: +$('p-vac').value || 0, balance_date: $('p-bdate').value || null, vacation_start: +$('p-vstart').value || 0,
-          saldo_start_min: Math.round((parseFloat(String($('p-sstart').value).replace(',', '.')) || 0) * 60) });
+          saldo_start_min: Math.round((parseFloat(String($('p-sstart').value).replace(',', '.')) || 0) * 60), entry_date: $('p-entry').value || null, company_car: $('p-car').checked });
         toast('Gespeichert'); viewTeam(month);
       });
     };

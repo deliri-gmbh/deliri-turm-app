@@ -44,7 +44,8 @@
       async listProfiles() { return ok(await sb.from('profiles').select('*').order('name')); },
       async saveProfile(p) {
         const row = { name: p.name, email: (p.email || '').toLowerCase(), kind: p.kind, role: p.role, active: p.active,
-          weekly_hours: p.weekly_hours, vacation_per_year: p.vacation_per_year, balance_date: p.balance_date || null, vacation_start: p.vacation_start, saldo_start_min: p.saldo_start_min };
+          weekly_hours: p.weekly_hours, vacation_per_year: p.vacation_per_year, balance_date: p.balance_date || null, vacation_start: p.vacation_start, saldo_start_min: p.saldo_start_min,
+          entry_date: p.entry_date || null, company_car: p.company_car !== false };
         if (p.id) return ok(await sb.from('profiles').update(row).eq('id', p.id).select().single());
         return ok(await sb.from('profiles').insert(row).select().single());
       },
@@ -69,6 +70,7 @@
       },
       async signMonth(m) { return ok(await sb.from('month_signoffs').insert(m).select().single()); },
       async unsignMonth(id) { ok(await sb.from('month_signoffs').delete().eq('id', id)); },
+      async listRequests() { return ok(await sb.from('time_entries').select('*').eq('status', 'beantragt').order('work_date')); },
       async getSettings() { const r = await sb.from('app_settings').select('data').eq('id', 1).maybeSingle(); return r.data?.data || {}; },
       async saveSettings(data) { ok(await sb.from('app_settings').update({ data, updated_at: new Date().toISOString() }).eq('id', 1)); },
       async listTimeLog(f) { return ok(await sb.from('time_entries_log').select('*').eq('profile_id', f.profileId).gte('work_date', f.from).lte('work_date', f.to).order('changed_at', { ascending: false }).limit(200)); },
@@ -188,6 +190,7 @@
       async listMonthSignoffs(f) { return db.months.filter(m => m.month === f.month && (!f.profileId || m.profile_id === f.profileId)); },
       async signMonth(m) { const x = { id: uid(), signed_at: now(), ...m }; db.months.push(x); save(); return x; },
       async unsignMonth(id) { db.months = db.months.filter(m => m.id !== id); save(); },
+      async listRequests() { return db.time.filter(t => t.status === 'beantragt').sort((a, b) => a.work_date.localeCompare(b.work_date)); },
       async getSettings() { return db.settings || {}; },
       async saveSettings(data) { db.settings = data; save(); },
       async listTimeLog(f) { return db.timelog.filter(l => l.profile_id === f.profileId && l.work_date >= f.from && l.work_date <= f.to).reverse(); },

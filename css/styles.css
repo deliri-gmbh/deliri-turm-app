@@ -283,3 +283,8 @@ table.timetbl td:first-child,table.teamtbl td:first-child{width:auto;text-align:
 .settbl input,.settbl select{font:inherit;width:100%;min-width:60px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
 .settbl .cc{width:56px}
 #setbox summary{list-style:none}
+.daybox{display:inline-flex;align-items:center;gap:2px;margin-right:4px;font-size:12px}
+.daybox input{width:16px;height:16px;min-width:0}
+.pill.k-pflege,.pill.k-sonder{background:#dcefff;color:#0b5aa0}
+.pill.k-arzt{background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+.primary.small{min-height:36px;padding:6px 12px;font-size:14px}
