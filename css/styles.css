@@ -15,6 +15,7 @@
   color-scheme:dark}}
 
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45;-webkit-tap-highlight-color:transparent}
 a{color:inherit}
@@ -266,3 +267,19 @@ details summary{cursor:pointer}
 .toast.bad{background:var(--bad)}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 table.timetbl td:first-child,table.teamtbl td:first-child{width:auto;text-align:left}
+/* Reisekosten, Orte, Zulagen */
+.costs{display:grid;gap:8px;border-top:4px solid var(--blue)}
+.costgrid{display:grid;grid-template-columns:1fr auto;gap:4px 16px;font-size:14px}
+.costgrid b{text-align:right;font-variant-numeric:tabular-nums}
+.placefld{position:relative}
+.sugg{position:absolute;left:0;right:0;top:100%;z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.15);display:grid;max-height:260px;overflow:auto}
+.sugg button{font:inherit;font-weight:400;color:var(--ink);text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:10px 12px;cursor:pointer}
+.sugg button:hover,.sugg button:focus{background:var(--bg)}
+.trip .row{width:100%}
+.trip .two,.trip .three{width:100%}
+.allowrow{display:flex;align-items:center;gap:8px}
+.alh{width:80px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.pill.k-zulage{background:#efe6ff;color:#5b3aa8}
+.settbl input,.settbl select{font:inherit;width:100%;min-width:60px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.settbl .cc{width:56px}
+#setbox summary{list-style:none}

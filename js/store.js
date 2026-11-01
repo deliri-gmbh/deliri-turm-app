@@ -69,6 +69,8 @@
       },
       async signMonth(m) { return ok(await sb.from('month_signoffs').insert(m).select().single()); },
       async unsignMonth(id) { ok(await sb.from('month_signoffs').delete().eq('id', id)); },
+      async getSettings() { const r = await sb.from('app_settings').select('data').eq('id', 1).maybeSingle(); return r.data?.data || {}; },
+      async saveSettings(data) { ok(await sb.from('app_settings').update({ data, updated_at: new Date().toISOString() }).eq('id', 1)); },
       async listTimeLog(f) { return ok(await sb.from('time_entries_log').select('*').eq('profile_id', f.profileId).gte('work_date', f.from).lte('work_date', f.to).order('changed_at', { ascending: false }).limit(200)); },
 
       async listTowers() { return ok(await sb.from('towers').select('*').order('created_at', { ascending: false })); },
@@ -186,6 +188,8 @@
       async listMonthSignoffs(f) { return db.months.filter(m => m.month === f.month && (!f.profileId || m.profile_id === f.profileId)); },
       async signMonth(m) { const x = { id: uid(), signed_at: now(), ...m }; db.months.push(x); save(); return x; },
       async unsignMonth(id) { db.months = db.months.filter(m => m.id !== id); save(); },
+      async getSettings() { return db.settings || {}; },
+      async saveSettings(data) { db.settings = data; save(); },
       async listTimeLog(f) { return db.timelog.filter(l => l.profile_id === f.profileId && l.work_date >= f.from && l.work_date <= f.to).reverse(); },
 
       async listTowers() { return [...db.towers].sort((a, b) => b.created_at.localeCompare(a.created_at)); },
