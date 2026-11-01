@@ -362,7 +362,7 @@
         <p class="muted small">Gesamte Zeit vor Ort an diesem Turm. Ein Eintrag pro Truppe oder pro Zeitblock.</p>
         ${wds.length ? `<ul class="entries">${wds.map(w => { const hh = hoursOf(w.start_time, w.end_time, w.pause_min); return `<li>
           <div class="row between"><b class="mono">${esc(w.start_time)}–${esc(w.end_time)}</b><span class="num">${h(hh)} h × ${w.persons} = <b>${h(hh * w.persons)} Mh</b></span></div>
-          <div class="muted small">${w.persons} Personen${w.names ? ': ' + esc(w.names) : ''} · Pause ${w.pause_min} min${w.weather ? ' · ' + esc(w.weather) : ''}</div>
+          <div class="muted small">${w.persons} Personen${w.names ? ': ' + esc(w.names) : ''} · Pause ${w.pause_min} min</div>
           ${w.activities ? `<p class="small">${esc(w.activities)}</p>` : ''}
           <div class="row between"><span class="muted small">eingetragen von ${esc(w.created_by_name)}</span><button type="button" class="ghost small" data-delw="${w.id}">Löschen</button></div></li>`; }).join('')}</ul>` : ''}
         <form id="f-work" class="subform">
@@ -371,26 +371,24 @@
             <label class="fld">Bis<input type="time" id="w-end" value="17:00" required></label>
             <label class="fld">Pause (min)<input type="number" id="w-pause" value="30" min="0" step="5" inputmode="numeric"></label>
           </div>
-          <div class="two">
-            <label class="fld">Personen<input type="number" id="w-pers" value="2" min="1" required inputmode="numeric"></label>
-            <label class="fld">Wetter (optional)<input id="w-weather" placeholder="z.B. trocken, 8 °C"></label>
-          </div>
+          <label class="fld">Personen<input type="number" id="w-pers" value="2" min="1" required inputmode="numeric"></label>
           <label class="fld">Namen<input id="w-names" placeholder="z.B. Andy, Kilian"></label>
-          <label class="fld">Tätigkeiten / Bemerkungen<textarea id="w-act" rows="2" placeholder="z.B. Gitterscheiben C05 bis C12, Wartezeit Kran 1 h"></textarea></label>
+          <label class="fld">Tätigkeiten / Bemerkungen<textarea id="w-act" rows="2" placeholder="z.B. Gitterscheiben C05 bis C12 montiert"></textarea></label>
           <button class="primary" type="submit">Arbeitszeit speichern</button>
         </form>
       </section>
 
       <section class="card sec regie">
         <h2>Regiearbeiten</h2>
-        <p class="muted small">Arbeiten außerhalb des Auftrags, die vor Ort angeordnet wurden. Sie stehen im Tagesbericht extra und sind Teil der Gesamtzeit oben.</p>
+        <p class="muted small">Alles, was nicht im Auftrag enthalten ist, z.B. vor Ort angeordnete Zusatzarbeiten. Die Regie steht im Tagesbericht extra und ist Teil der Gesamtzeit oben.</p>
+        <p class="note small"><b>Auch als Regie eintragen:</b> Stillstand wegen Wetter (Wind, Regen, Gewitter, Eis) und Stillstand oder Wartezeit wegen Kran. Bei „Was wurde gemacht?“ den Grund angeben, z.B. „Stillstand Wind“ oder „Wartezeit Kran“, und die Zeit von bis.</p>
         ${rgs.length ? `<ul class="entries">${rgs.map((r, i) => { const hh = hoursOf(r.start_time, r.end_time); return `<li>
           <div class="row between"><b>${esc(r.description)}</b><span class="num">${h(hh)} h × ${r.persons} = <b>${h(hh * r.persons)} Mh</b></span></div>
           <div class="muted small"><span class="mono">${esc(r.start_time)}–${esc(r.end_time)}</span>${r.ordered_by ? ' · angeordnet von ' + esc(r.ordered_by) : ''}${r.material ? ' · Material: ' + esc(r.material) : ''}</div>
           ${photos[i] ? `<a href="${esc(photos[i])}" target="_blank" rel="noopener"><img class="thumb" src="${esc(photos[i])}" alt="Foto Regiearbeit" loading="lazy"></a>` : ''}
           <div class="row between"><span class="muted small">eingetragen von ${esc(r.created_by_name)}</span><button type="button" class="ghost small" data-delr="${r.id}">Löschen</button></div></li>`; }).join('')}</ul>` : ''}
         <form id="f-regie" class="subform">
-          <label class="fld">Was wurde gemacht?<input id="r-desc" required placeholder="z.B. Kabelrinne C03 versetzt"></label>
+          <label class="fld">Was wurde gemacht?<input id="r-desc" required placeholder="z.B. Kabelrinne C03 versetzt, Stillstand Wind, Wartezeit Kran"></label>
           <label class="fld">Angeordnet von<input id="r-by" placeholder="Name, Firma (z.B. Polier Max Bögl)"></label>
           <div class="three">
             <label class="fld">Von<input type="time" id="r-start" required></label>
@@ -421,7 +419,7 @@
     document.getElementById('f-work').onsubmit = e => {
       e.preventDefault();
       safe(async () => {
-        await S.addWorkday({ tower_id: tower.id, work_date: date, start_time: v('w-start'), end_time: v('w-end'), pause_min: +v('w-pause') || 0, persons: +v('w-pers') || 1, names: v('w-names'), activities: v('w-act'), weather: v('w-weather') });
+        await S.addWorkday({ tower_id: tower.id, work_date: date, start_time: v('w-start'), end_time: v('w-end'), pause_min: +v('w-pause') || 0, persons: +v('w-pers') || 1, names: v('w-names'), activities: v('w-act') });
         toast('Arbeitszeit gespeichert'); viewTower(tower.id, 'tag');
       });
     };

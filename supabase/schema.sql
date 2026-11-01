@@ -70,7 +70,6 @@ create table if not exists public.workdays (
   persons int not null default 2,
   names text default '',
   activities text default '',        -- Tätigkeiten / Bemerkungen
-  weather text default '',
   created_at timestamptz not null default now(),
   created_by uuid default auth.uid(),
   created_by_name text default ''

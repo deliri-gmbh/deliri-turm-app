@@ -9,7 +9,7 @@ Tagesberichte und Checklisten für den Leiterbau im Betonturm (WLS Montage inkl.
 - Mängel melden mit Foto, Ort und benötigtem Ersatzteil. Offene Mängel stehen auf der Startseite und bei allen Türmen im selben Windpark, damit die nächste Truppe das richtige Teil mitnimmt.
 - Abschluss je Phase mit Unterschrift. Nach dem Finishing landet der Turm im Archiv.
 - Montageprotokoll je Turm zum Drucken bzw. als PDF
-- **Tagesbericht**: Arbeitszeit (von, bis, Pause, Personen, Namen, Tätigkeiten) und **Regiearbeiten** (Tätigkeit, angeordnet von, Zeit, Personen, Material, Foto). Pro Windpark und Tag entsteht daraus automatisch ein Bericht mit Mannstunden gesamt, davon Regie und dem, was laut Checkliste erledigt wurde. Zum Drucken, als PDF oder als Text für E-Mail und WhatsApp.
+- **Tagesbericht**: Arbeitszeit (von, bis, Pause, Personen, Namen, Tätigkeiten) und **Regiearbeiten** inkl. Stillstand wegen Wetter oder Kran (Tätigkeit, angeordnet von, Zeit, Personen, Material, Foto). Pro Windpark und Tag entsteht daraus automatisch ein Bericht mit Mannstunden gesamt, davon Regie und dem, was laut Checkliste erledigt wurde. Zum Drucken, als PDF oder als Text für E-Mail und WhatsApp.
 - Mehrere Leute können gleichzeitig am selben Turm arbeiten, die Ansicht aktualisiert sich live
 
 Ohne Datenbank läuft die App im **Demo-Modus**: Alles bleibt dann nur auf dem einen Gerät. So kannst du sie sofort ausprobieren.
