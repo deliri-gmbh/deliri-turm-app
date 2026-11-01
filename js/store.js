@@ -88,6 +88,7 @@
         else ok(await sb.from('checks').delete().match({ tower_id: towerId, phase, item_id: itemId }));
       },
 
+      async unsetChecks(towerId, phase, itemIds) { ok(await sb.from('checks').delete().eq('tower_id', towerId).eq('phase', phase).in('item_id', itemIds)); },
       async setChecks(towerId, phase, itemIds) {
         const at = new Date().toISOString(), by = nameOf(user);
         ok(await sb.from('checks').upsert(itemIds.map(item_id => ({ tower_id: towerId, phase, item_id, done: true, value: '', done_by_name: by, done_at: at }))));
@@ -209,6 +210,7 @@
         save();
       },
 
+      async unsetChecks(towerId, phase, itemIds) { const ids = new Set(itemIds); db.checks = db.checks.filter(c => !(c.tower_id === towerId && c.phase === phase && ids.has(c.item_id))); save(); },
       async setChecks(towerId, phase, itemIds) {
         const ids = new Set(itemIds), at = now();
         db.checks = db.checks.filter(c => !(c.tower_id === towerId && c.phase === phase && ids.has(c.item_id)));

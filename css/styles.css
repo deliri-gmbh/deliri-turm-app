@@ -292,3 +292,5 @@ table.timetbl td:first-child,table.teamtbl td:first-child{width:auto;text-align:
 .clockbtns .ghost{min-height:46px}
 .mm input.numin{width:150px}
 .repnums{margin:8px 0 4px}
+.nonebtn{color:var(--bad);border-color:var(--bad-soft)}
+.nonebtn.danger{background:var(--bad);color:#fff;border-color:var(--bad)}
