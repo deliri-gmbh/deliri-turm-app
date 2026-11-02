@@ -230,7 +230,8 @@
   const PREASSEMBLY_SECTION = { title: 'Vormontage am Boden',
     note: 'Solange die Gitterscheiben mit den Leiterelementen noch am Boden liegen, gleich alle durchgehen.',
     items: [
-      { id: 'vm_verbinder', text: 'Fallschutzschienen-Verbinder (Stahlstück mit 2 Schrauben, verbindet die Schiene mit der nächsten) bei allen Gitterscheiben eingeschoben und festgezogen, sodass er sich nicht bewegt', img: 'img/fss-verbinder.jpg' },
+      { id: 'vm_verbinder', text: 'Fallschutzschienen-Verbinder (Stahlstück mit 2 Schrauben, verbindet die Schiene mit der nächsten) bei allen Gitterscheiben eingeschoben und festgezogen, sodass er sich nicht bewegt', img: 'img/fss-verbinder.jpg', imgpos: '62% 62%' },
+      { id: 'vm_wandstrebe', text: 'Hauptschraube der Wandstreben (seitlich an den Leiterelementen) links und rechts lockern, nur 1/4 bis 1/2 Umdrehung, nicht zu locker. So lässt sich der Arm oben leichter bewegen', img: 'img/wandstrebe-schraube.jpg', imgpos: '35% 55%' },
       { id: 'vm_loctite', text: 'Alle Schrauben (M10 / M12) mit Loctite gesichert: blauer Punkt auf den Kopf und Loctite aufs Gewinde' }
     ] };
 

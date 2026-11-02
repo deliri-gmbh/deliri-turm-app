@@ -256,7 +256,7 @@
               <span class="mm"><input type="number" inputmode="decimal" id="in-${it.id}" value="${esc(ch?.value || '')}" placeholder="mm" aria-label="${esc(it.text)}"><button type="button" class="ghost small" data-in="${it.id}" data-min="${it.min}" data-max="${it.max}">Speichern</button></span>
               ${ch ? `${(+ch.value < it.min || +ch.value > it.max) ? '<span class="pill bad">außer Toleranz</span>' : '<span class="pill ok">in Toleranz</span>'} ${who(ch)}` : ''}</div></li>`;
           return `<li class="${ch ? 'is-done' : ''}"><label><input type="checkbox" class="ck" data-k="${it.id}" ${ch ? 'checked' : ''}>
-            <span class="txt">${esc(it.text)}${it.ref ? ` <span class="ref">${esc(it.ref)}</span>` : ''}${who(ch)}</span></label>${it.img ? `<a class="itemimg" href="${esc(it.img)}" target="_blank" rel="noopener"><img src="${esc(it.img)}" alt="So sieht das Teil aus" loading="lazy"><span>Foto vergrößern</span></a>` : ''}</li>`;
+            <span class="txt">${esc(it.text)}${it.ref ? ` <span class="ref">${esc(it.ref)}</span>` : ''}${who(ch)}</span></label>${it.img ? `<a class="itemimg" href="${esc(it.img)}" target="_blank" rel="noopener"><img src="${esc(it.img)}" alt="So sieht das Teil aus" loading="lazy"${it.imgpos ? ` style="object-position:${esc(it.imgpos)}"` : ''}><span>Foto vergrößern</span></a>` : ''}</li>`;
         }).join('')}</ul>`;
       }
       html += '</section>';
