@@ -226,7 +226,22 @@
       { id: 'fauf', text: 'FAUF-Nr. (Zettel auf Gitterscheibe Nr. 1, Barcode-Nummer unten links)', input: 'text', numeric: true, placeholder: 'z.B. 11216520', check: '^\\d{6,10}$' },
       { id: 'leiter_sn', text: 'Seriennummer der Leiter (Sticker auf der Leiter C01)', input: 'text', placeholder: 'Seriennummer' }
     ] };
-  Object.values(window.TEMPLATES).forEach(t => { if (!t.phases.wls.sections.some(x => x === START_SECTION)) t.phases.wls.sections.unshift(START_SECTION); });
+  // Gilt für jeden Turmtyp: Vormontage, solange die Gitterscheiben noch am Boden bzw. auf der Palette liegen
+  const PREASSEMBLY_SECTION = { title: 'Vormontage am Boden',
+    note: 'Solange die Gitterscheiben mit den Leiterelementen noch am Boden liegen, gleich alle durchgehen.',
+    items: [
+      { id: 'vm_verbinder', text: 'Verbindungselemente der Führungsschiene (zur nächsten Schiene) bei allen Gitterscheiben gesteckt und festgezogen, sodass sie sich nicht bewegen' },
+      { id: 'vm_loctite', text: 'Alle Schrauben (M10 / M12) mit Loctite gesichert: blauer Punkt auf den Kopf und Loctite aufs Gewinde' }
+    ] };
+
+  Object.values(window.TEMPLATES).forEach(t => {
+    const secs = t.phases.wls.sections;
+    if (!secs.includes(START_SECTION)) secs.unshift(START_SECTION);
+    if (!secs.includes(PREASSEMBLY_SECTION)) {
+      const i = secs.findIndex(x => x.title === 'Vorbereitung');
+      secs.splice(i >= 0 ? i + 1 : 1, 0, PREASSEMBLY_SECTION);
+    }
+  });
   window.flatItems = flatItems;
   window.summarizeDay = summarizeDay;
 })();
