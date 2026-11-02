@@ -230,7 +230,7 @@
   const PREASSEMBLY_SECTION = { title: 'Vormontage am Boden',
     note: 'Solange die Gitterscheiben mit den Leiterelementen noch am Boden liegen, gleich alle durchgehen.',
     items: [
-      { id: 'vm_verbinder', text: 'Verbindungselemente der Führungsschiene (zur nächsten Schiene) bei allen Gitterscheiben gesteckt und festgezogen, sodass sie sich nicht bewegen' },
+      { id: 'vm_verbinder', text: 'Fallschutzschienen-Verbinder (Stahlstück mit 2 Schrauben, verbindet die Schiene mit der nächsten) bei allen Gitterscheiben eingeschoben und festgezogen, sodass er sich nicht bewegt', img: 'img/fss-verbinder.jpg' },
       { id: 'vm_loctite', text: 'Alle Schrauben (M10 / M12) mit Loctite gesichert: blauer Punkt auf den Kopf und Loctite aufs Gewinde' }
     ] };
 

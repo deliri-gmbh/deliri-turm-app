@@ -294,3 +294,5 @@ table.timetbl td:first-child,table.teamtbl td:first-child{width:auto;text-align:
 .repnums{margin:8px 0 4px}
 .nonebtn{color:var(--bad);border-color:var(--bad-soft)}
 .nonebtn.danger{background:var(--bad);color:#fff;border-color:var(--bad)}
+.itemimg{display:flex;align-items:center;gap:10px;margin:0 0 10px 42px;text-decoration:none;font-size:13px;color:var(--muted)}
+.itemimg img{width:96px;height:96px;object-fit:cover;object-position:62% 62%;border-radius:6px;border:1px solid var(--line)}
